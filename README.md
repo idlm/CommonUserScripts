@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/grok-cl
 wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/grok-cli-runanytime/install.sh | bash
 ```
 
-**Codex 高峰排队重开**（当前目录）：
+**Codex 高峰排队重开**（当前目录；报错来自 anyrouter 经 Codex TUI，不是官方网页）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/codex-init-session/init-session.sh | bash -s -- -C "$(pwd)"
@@ -29,4 +29,4 @@ wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/codex-in
 | 目录 | 做什么 |
 |:--|:--|
 | [`grok-cli-runanytime/`](grok-cli-runanytime/) | 把 [Grok CLI](https://x.ai/cli) 接到 `runanytime.hxi.me` 的 **grok-4.6**（本机 thinking-proxy + 一键写配置）。之后只需 `nano ~/.bashrc` 改 Key。 |
-| [`codex-init-session/`](codex-init-session/) | Codex 交互式开会话：高峰 / `Reconnecting...` 就关掉这次，等 5 分钟再新开。 |
+| [`codex-init-session/`](codex-init-session/) | Codex 交互式开会话。匹配的是 **anyrouter.top 经 Codex TUI** 打出的 `high demand` / `Reconnecting...`，不是官方 ChatGPT 网页。命中就关会话、等 5 分钟再开。 |

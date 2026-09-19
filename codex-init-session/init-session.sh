@@ -2,11 +2,13 @@
 # 用交互式 Codex TUI 新开会话，输入 init。
 # 启动格式：codex --dangerously-bypass-approvals-and-sandbox
 #
-# 下面这种也算失败，等 5 分钟后重新开新会话：
+# 匹配的是 Codex TUI 上的字，不是官方 ChatGPT 网页。
+# 这几句来自把 Codex 指到 anyrouter.top（New API）时的高峰/重连：
 #   › init
 #   ◦ Reconnecting... 2/5 (8s • esc to interrupt)
 #     └ We're currently experiencing high demand, which may
 #       cause temporary errors.
+# 网关中文错误（未提供令牌、无可用渠道等）不会被当成可重试。
 #
 # init 成功后：有 task.md 就在同一会话里按它跑；没有就再等 5 分钟。
 # 成功时打印会话 ID，并写入文件。TUI 留在 screen 里，可 screen -r 进去。

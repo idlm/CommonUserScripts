@@ -2,6 +2,8 @@
 
 高峰期自动重试的 Codex **交互式** 开会话脚本。撞到 high demand / `Reconnecting...` 就关掉这次会话，等 5 分钟再新开。
 
+**这几句不是 ChatGPT 官方网页自己的文案。** 实测来源是把 Codex CLI 指到 **[anyrouter.top](https://anyrouter.top/)**（New API 网关）时，TUI 里打出来的高峰/重连提示。脚本认的是 **Codex 屏幕上的字**，不读 anyrouter 的 HTTP JSON。Codex 已经配好打 anyrouter、并且报错长这样时，才用本脚本。
+
 新开会话用的就是：
 
 ```bash
@@ -199,3 +201,30 @@ echo "$SID"
 - 这不是绕过限流，只是高峰失败后排队重开。
 - 不要把会话 ID 日志当密钥提交进 git。
 - 脚本会带 `--dangerously-bypass-approvals-and-sandbox`，只在你信任的目录跑。
+
+---
+
+## 和 anyrouter.top 的关系
+
+脚本 **不设置** `base_url`，也不会登录 anyrouter。要先自己把 Codex 接到该站，例如 `~/.codex/config.toml`：
+
+```toml
+model = "gpt-5.5"
+model_provider = "anyrouter"
+
+[model_providers.anyrouter]
+name = "anyrouter"
+base_url = "https://anyrouter.top/v1"
+wire_api = "responses"
+```
+
+`~/.codex/auth.json` 里放 anyrouter 的 Key。国模 / 没有 `/v1/responses` 的模型不要接 Codex。
+
+| TUI / 网关报错 | 脚本会不会重开 |
+|:--|:--|
+| `We're currently experiencing high demand...` | **会**（这就是当初写脚本时的 anyrouter 报错） |
+| `Reconnecting... 2/5` 以及更高次数 | **会** |
+| `usage limit` / `429 too many requests` | **会** |
+| `未提供令牌` / `无效的令牌` / `No available channel` / 中文限流 / WAF | **不会**（字对不上，会干等或超时） |
+
+所以：**适用于「Codex 已经走 anyrouter，且失败长得像上面英文高峰句」**；不适用于「还没配网关」或「anyrouter 返回中文 new_api_error」。换 Key、换渠道、绕 CDN，本脚本都不做。
