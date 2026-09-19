@@ -50,7 +50,7 @@ HK3DEV/
         ├── install.sh
         ├── setup-swap-4g.sh
         ├── protect-agents.sh              oom_score_adj=-800（Cline 方案）
-        ├── run-in-packing-slice.sh        重活丢进 packing.slice
+        ├── run-in-packing-slice.sh        重活丢进 packing.slice（QA 打包覆盖 2000/2600 + store）
         ├── vps-guard.sh
         ├── vps-guard.service / .timer
         └── *.conf                         systemd drop-in 模板
@@ -387,7 +387,40 @@ sudo ./setup-swap-4g.sh
 sudo ./protect-agents.sh    # 给当前 cline/claude/codex/grok 设 oom_score_adj=-800
 ```
 
-细节、三档表、Cline 会话里的 C+A 方案、排错命令见 [`examples/vps-guard/README.md`](examples/vps-guard/README.md)。
+细节、三档表、Cline 会话里的 C+A 方案、**已验证打包命令**、排错命令见 [`examples/vps-guard/README.md`](examples/vps-guard/README.md)。
+
+### 已验证配方（下次完成打包照这条）
+
+诊断模板在 `ef3a2aa`。Cline 后来用下面这条把 Linux deb + AppImage 打完：`PACK_EXIT=0` `VERIFY_EXIT=0`。下次 4G / 同类机打 Electron 包直接抄，不要再裸跑 `npm run pack:linux`。
+
+失败对照：
+
+| 做法 | 结果 |
+|:--|:--|
+| 裸 `npm run pack:linux` | `user.slice` 内 OOM，7za 连坐 cline |
+| `nice -n 19 ionice -c3 NODE_OPTIONS=--max-old-space-size=1536 npm run pack:linux` | 仍在同 memcg，不够 |
+| `systemd-run --slice=packing.slice` + `-c.compression=store` | **成功** |
+
+下次：
+
+```bash
+# 工作目录换成你的 Electron 项目；磁盘不是 sda 就改设备名。
+systemd-run --unit=pd-pack --slice=packing.slice --collect \
+  -p MemoryHigh=2000M -p MemoryMax=2600M -p CPUQuota=250% \
+  -p IOReadBandwidthMax="/dev/sda 20M" -p IOWriteBandwidthMax="/dev/sda 20M" \
+  -p WorkingDirectory=/path/to/electron-app \
+  /bin/bash -c 'npm run pack:linux -- -c.compression=store && npm run verify:package'
+```
+
+等价包装脚本（模板默认 2400/2800，QA 打包覆盖成实测 2000/2600）：
+
+```bash
+sudo PACK_MEM_HIGH=2000M PACK_MEM_MAX=2600M PACK_CWD=/path/to/electron-app \
+  /usr/local/sbin/run-in-packing-slice.sh -- \
+  bash -lc 'npm run pack:linux -- -c.compression=store && npm run verify:package'
+```
+
+`compression=store` 体积换内存（本机 QA deb ~153MB，默认压缩约 105MB）。正式发布应在内存充足的 runner 上用默认压缩重建。Windows 交叉构建另需 wine，不在本配方内。Electron 应用本身不进本仓，这里只留环境方案。
 
 ### Cline 当时给出的方案（会话 `1789847324501_r6o6f`，已并入模板）
 
@@ -399,21 +432,23 @@ sudo ./protect-agents.sh    # 给当前 cline/claude/codex/grok 设 oom_score_ad
 | 2 诊断 | `20:01:15 CONSTRAINT_MEMCG`：`7za` 1.19G + cline 511M 顶穿当时 emergency 的 2600M。**档位降级把内存上限一起缩小**是设计缺陷 | user MemoryMax 下限改成 ok 3600 / high 3400 / emergency **3200** |
 | 2 隔离 | 构建进程在 `user.slice/user-0.slice/session-3.scope`，和 cline 同 memcg | `systemd-run --slice=packing.slice`（顶层，守卫管不到） |
 | 2 保险 | 内核按 badness 选受害者，cline adj=0 | `oom_score_adj=-800` |
-| 2 降峰 | 同 slice 里 `nice -n 19 ionice -c3`、`NODE_OPTIONS=--max-old-space-size=1536`；仍 OOM 则 electron-builder `-c.compression=store` | 脚本 `run-in-packing-slice.sh`；store 压缩按需，不写进守卫 |
+| 2 降峰 | 同 slice 里 `nice -n 19 ionice -c3`、`NODE_OPTIONS=--max-old-space-size=1536`；仍 OOM 则 electron-builder `-c.compression=store` | **实测必须 store + packing.slice 才 EXIT=0**；见上一节已验证命令 |
 
-本机现况与方案对齐：`protect-agents.sh` 已把 cline/claude 调到 `-800`；`packing.slice` 在（active）；守卫三档已是 3600/3400/3200。
+本机现况与方案对齐：cline/claude `oom_score_adj=-800`（当时是手工写的；git 里的 `protect-agents.sh` / `run-in-packing-slice.sh` 本机 `/usr/local/sbin` 未装）；`packing.slice` active；守卫三档已是 3600/3400/3200。Linux 打包已用上一节命令跑通。
 
-### 验证（本机 2026-09-19 晚）
+### 验证（本机 2026-09-19 晚，打包完成后）
 
 ```
-swap           4.0G  ·  used 0
+swap             4.0G
 memory.swap.max  user=max  system=max
 vps-guard.timer  active
-vps-guard state  high          # 当时 IO 仍偏高，档位在收
-io.max           8:0 rbps=16000000 wbps=16000000   # high 档 16M+16M
-Cline            被 OOM 后已重新起来；钉死 deepseek 未动
-oom_score_adj    cline/claude = -800
+vps-guard state  ok            # 打包期间偶发 pending high，2-tick 未确认故未降档
+Cline            仍在；钉死 deepseek 未动
+oom_score_adj    cline = -800
 packing.slice    loaded active
+PACK_EXIT        0
+VERIFY_EXIT      0
+Linux QA         deb ~153MB (store) + AppImage ~165MB
 ```
 
 Cline Pass 钉死 / 缓存命中率不在本目录展开，见 [`../cline-pass-pin/`](../cline-pass-pin/)。本目录 **仍然不放** switcher 配置、JWT、SK。
@@ -435,4 +470,5 @@ Cline Pass 钉死 / 缓存命中率不在本目录展开，见 [`../cline-pass-p
 ✗  看门狗每 30s drop_caches
 ✗  档位降级时把 MemoryMax 收到构建峰值以下（Cline 第二轮踩过：2600M 杀掉 7za+cline）
 ✗  在 user.slice 里跟 Cline 同 memcg 跑 electron-builder / 7za
+✗  4G 机打 Electron 包不用 packing.slice、不用 -c.compression=store（已验证只有这条 EXIT=0）
 ```

@@ -49,13 +49,64 @@ system.slice IORead/WriteBandwidthMax = 24M
 
 ```bash
 sudo ./protect-agents.sh                          # 给已有 cline/claude/codex/grok 设 -800
-sudo ./run-in-packing-slice.sh -- npm run pack:linux
-# 仍 OOM 时：
-# sudo PACK_MEM_MAX=2800M ./run-in-packing-slice.sh -- \
-#   env NODE_OPTIONS=--max-old-space-size=1024 npm run pack:linux -- -c.compression=store
 ```
 
-`oom_score_adj` 是进程属性，重启失效。Cline CLI 是 pts 交互进程、没有 unit，开机后要再跑 `protect-agents.sh`，或在对应 systemd service 里写 `OOMScoreAdjust=-800`。
+`oom_score_adj` 是进程属性，重启失效。Cline CLI 是 pts 交互进程、没有 unit，开机后要再跑 `protect-agents.sh`，或在对应 systemd service 里写 `OOMScoreAdjust=-800`。本机 `/usr/local/sbin/protect-agents.sh` 与 `run-in-packing-slice.sh` 当时未装，adj=-800 是手工写过的。
+
+## 已验证配方（下次 4G 机打 Electron 包照这条）
+
+Cline 在会话 `1789847324501_r6o6f` 里把 Linux deb + AppImage 打完。`PACK_EXIT=0` `VERIFY_EXIT=0`。诊断在上一节；**完成任务用的是下面这条，不是裸 `npm run pack:linux`。**
+
+失败对照（不要再走）：
+
+```
+裸 npm run pack:linux
+  → user.slice 内 7za+agent 同 memcg，CONSTRAINT_MEMCG，连坐 cline
+
+nice -n 19 ionice -c3 NODE_OPTIONS=--max-old-space-size=1536 npm run pack:linux
+  → 仍在 user.slice，内存/压缩峰值不够
+
+packing.slice 隔离 + electron-builder -c.compression=store
+  → 成功
+```
+
+下次直接：
+
+```bash
+# 磁盘不是 sda 就改设备名。工作目录换成你的 Electron 项目。
+systemd-run --unit=pd-pack --slice=packing.slice --collect \
+  -p MemoryHigh=2000M -p MemoryMax=2600M -p CPUQuota=250% \
+  -p IOReadBandwidthMax="/dev/sda 20M" -p IOWriteBandwidthMax="/dev/sda 20M" \
+  -p WorkingDirectory=/path/to/electron-app \
+  /bin/bash -c 'npm run pack:linux -- -c.compression=store && npm run verify:package'
+```
+
+或用本目录包装脚本（默认 2400/2800，QA 打包覆盖成实测值）：
+
+```bash
+sudo PACK_MEM_HIGH=2000M PACK_MEM_MAX=2600M PACK_CWD=/path/to/electron-app \
+  ./run-in-packing-slice.sh -- \
+  bash -lc 'npm run pack:linux -- -c.compression=store && npm run verify:package'
+```
+
+前置（缺一条就会再 OOM）：
+
+1. vps-guard 三档 user MemoryMax = 3600 / 3400 / **3200**（不要再收到 2600）
+2. `/swapfile` 4G + `memory.swap.max=max`（`MemorySwapMax=0` 等于没加）
+3. agent `oom_score_adj=-800`
+4. 构建进顶层 `packing.slice`，不进 `user.slice`
+
+本机 2026-09-19 结果（环境证据，项目本身不进本仓）：
+
+```
+PACK_EXIT=0
+VERIFY_EXIT=0
+deb      ~153MB   (store；默认压缩约 105MB)
+AppImage ~165MB
+vps-guard state=ok；偶发 pending high，2-tick 未确认故未降档
+```
+
+`compression=store` 是体积换内存，只给 4G QA 机。正式发布应在内存充足的 runner 上用默认压缩重建。容器 root 下 UI smoke 需要 `--no-sandbox`。Windows 交叉构建另需 wine，不在本配方内。
 
 ## 装
 
@@ -101,4 +152,5 @@ systemctl status packing.slice --no-pager
 ✗  把 MemoryMax 压到 2G 以下还在 user.slice 里跑 Cline + 7za
 ✗  档位降级时把 MemoryMax 收到构建峰值以下
 ✗  在 user.slice 里跟 Cline 同 memcg 跑 electron-builder / 7za
+✗  4G 机打 Electron 包跳过 packing.slice 或跳过 -c.compression=store
 ```
