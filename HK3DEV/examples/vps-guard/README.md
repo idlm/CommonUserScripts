@@ -51,7 +51,7 @@ system.slice IORead/WriteBandwidthMax = 24M
 sudo ./protect-agents.sh                          # 给已有 cline/claude/codex/grok 设 -800
 ```
 
-`oom_score_adj` 是进程属性，重启失效。Cline CLI 是 pts 交互进程、没有 unit，开机后要再跑 `protect-agents.sh`，或在对应 systemd service 里写 `OOMScoreAdjust=-800`。本机 `/usr/local/sbin/protect-agents.sh` 与 `run-in-packing-slice.sh` 当时未装，adj=-800 是手工写过的。
+`oom_score_adj` 是进程属性，重启会丢。Cline CLI 是 pts 交互进程、没有 unit。装完之后 `vps-guard` 每 30s 会再跑 `protect-agents.sh`（已是目标值则静默）。也可在对应 systemd service 里写 `OOMScoreAdjust=-800`。3HK 当时 `/usr/local/sbin` 未装这两个 helper，adj=-800 是手工写过的。
 
 ## 已验证配方（下次 4G 机打 Electron 包照这条）
 
@@ -108,15 +108,39 @@ vps-guard state=ok；偶发 pending high，2-tick 未确认故未降档
 
 `compression=store` 是体积换内存，只给 4G QA 机。正式发布应在内存充足的 runner 上用默认压缩重建。容器 root 下 UI smoke 需要 `--no-sandbox`。Windows 交叉构建另需 wine，不在本配方内。
 
-## 装
+## 装（另一台同规格机一键）
+
+不 clone。Debian/Ubuntu + systemd + cgroup v2 + 约 4G RAM。需要 root。
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/HK3DEV/examples/vps-guard/install.sh | sudo bash
+```
+
+```bash
+wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/HK3DEV/examples/vps-guard/install.sh | sudo bash
+```
+
+磁盘不是 sda、不要建 swap、内存不是 ~4G 仍要装：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/HK3DEV/examples/vps-guard/install.sh \
+  | sudo bash -s -- --disk /dev/vda
+# curl -fsSL …/install.sh | sudo bash -s -- --no-swap
+# curl -fsSL …/install.sh | sudo bash -s -- --force
+```
+
+管道参数必须写在 `bash -s --` 后面，漏 `--` 脚本看不到。
+
+已 clone 本仓时仍可本地跑（不拉 raw）：
+
+```bash
+cd CommonUserScripts/HK3DEV/examples/vps-guard
 # 磁盘不是 /dev/sda 时：
 #   VPS_GUARD_DISK=/dev/vda sudo ./install.sh
 sudo ./install.sh
-sudo ./setup-swap-4g.sh     # 4G 内存机强烈建议；没有 swap 时 MemoryMax 就是硬杀
-sudo ./protect-agents.sh    # 给当前 agent 进程 oom_score_adj=-800
 ```
+
+`install.sh` 会：装守卫 + 4G `/swapfile` + `protect-agents.sh` + `run-in-packing-slice.sh`，清掉 `user-0.slice` 上可能叠乘的 `io.max`。`vps-guard` 每 30s 会再写一次 agent `oom_score_adj=-800`（重启后不再丢）。不装 Cline Pass pin，不改 AI 配置。
 
 `setup-swap-4g.sh` 会：
 

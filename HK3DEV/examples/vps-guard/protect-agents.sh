@@ -8,10 +8,12 @@ pat='(^|/)(cline|claude|codex|grok)( |$)'
 changed=0
 for pid in $(ps -eo pid=,args= | awk -v p="$pat" '$0 ~ p {print $1}'); do
   [[ -w /proc/$pid/oom_score_adj ]] || continue
+  cur=$(cat "/proc/$pid/oom_score_adj" 2>/dev/null || echo "")
+  [[ "$cur" == "$ADJ" ]] && continue
   echo "$ADJ" > "/proc/$pid/oom_score_adj" || continue
   echo "pid=$pid adj=$ADJ cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" | cut -c1-80)"
   changed=$((changed + 1))
 done
 echo "updated=$changed adj=$ADJ"
-# 注意：这是进程属性，重启后失效。要持久化可在对应 systemd service 里设 OOMScoreAdjust=-800。
-# Cline CLI 当前是 pts 上的交互进程，没有 unit，所以开机后需要再跑一次，或挂在 cron/vps-guard 里。
+# 进程属性，重启后失效。vps-guard 每 tick 会再跑本脚本；已是目标值则上面 continue，不刷屏。
+# 也可在对应 systemd service 里设 OOMScoreAdjust=-800。Cline CLI 是 pts 交互进程，没有 unit。

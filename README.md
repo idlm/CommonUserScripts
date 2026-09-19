@@ -43,7 +43,7 @@ CommonUserScripts/
 | [`grok-cli-runanytime`](grok-cli-runanytime/) | 本机 thinking-proxy，剥掉缺 `signature` 的思考块 | `install.sh` |
 | [`codex-init-session`](codex-init-session/) | 先探 `/v1/responses`，再单发 `codex exec --json init` | `init-session.sh` |
 | [`dev-env-setup`](dev-env-setup/) | 新机预检 → 方案 → 勾选；Android SDK 34 + AI CLI + CPA | `setupv11.sh` |
-| [`HK3DEV`](HK3DEV/) | 主机 `3HK` 快照：systemd / 端口 / Claude·Codex·Grok 模板 | `README.md` |
+| [`HK3DEV`](HK3DEV/) | 主机 `3HK` 快照 + 4G 机 vps-guard 一键 | `examples/vps-guard/install.sh` |
 | [`cline-pass-pin`](cline-pass-pin/) | 钉 `ds-v4.1-flash` 到 Vercel `deepseek`，拉高缓存 | `install.sh` |
 
 ---
@@ -168,10 +168,24 @@ CPA 不代登。装完自己 `cpa --claude-login` / `--codex-login` / `--login`�
    codex    anyrouter.top  +  CPA :8317
 ```
 
-这不是一键安装器。拷 `HK3DEV/examples/` 到家目录，自己填 Key。
-真实 `auth.json` / `sk-` / `xapi_` **不进 git**。
+家目录配置模板仍要自己拷、自己填 Key。真实 `auth.json` / `sk-` / `xapi_` **不进 git**。
 
-说明与复用步骤：[`HK3DEV/README.md`](HK3DEV/)
+同规格另一台 4G Debian（systemd + cgroup v2）要整机限 I/O + 看门狗 + packing.slice，走一键，不 clone：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/HK3DEV/examples/vps-guard/install.sh | sudo bash
+```
+
+```bash
+wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/HK3DEV/examples/vps-guard/install.sh | sudo bash
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/HK3DEV/examples/vps-guard/install.sh \
+  | sudo bash -s -- --disk /dev/vda
+```
+
+说明与复用步骤：[`HK3DEV/README.md`](HK3DEV/) · [`HK3DEV/examples/vps-guard/`](HK3DEV/examples/vps-guard/)
 
 旧版菜单 / 脚本清单：
 

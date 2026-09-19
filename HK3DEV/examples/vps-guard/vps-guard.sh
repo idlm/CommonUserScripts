@@ -87,3 +87,8 @@ else
     logger -t "$LOGTAG" "pending $level (x$streak/$CONFIRM_TICKS) keeping $prev load=$load mem_avail=${mem_avail_pct}% io_psi=$io_full"
   fi
 fi
+
+# agent 重启后 adj 会丢；每 tick 补一次，已是目标值则 protect-agents 静默。
+if [ -x /usr/local/sbin/protect-agents.sh ]; then
+  /usr/local/sbin/protect-agents.sh >/dev/null || true
+fi

@@ -261,7 +261,7 @@ apt-get install -y git curl wget screen htop btop nano \
   openssh-server postgresql-17 redis-server
 
 # 0b. 4G 内存机：swap + 整机 I/O 看门狗（见 §07）
-# cd CommonUserScripts/HK3DEV/examples/vps-guard && sudo ./install.sh && sudo ./setup-swap-4g.sh
+# curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/HK3DEV/examples/vps-guard/install.sh | sudo bash
 
 # 1. AI CLI：走本仓 dev-env-setup，或 npm 全局
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/dev-env-setup/setupv11.sh \
@@ -377,14 +377,19 @@ Key 占位，URL 保留本机值 `https://x-api.cfd/v1`。
 /swapfile + /etc/fstab 一行
 ```
 
-新机：
+新机（同规格另一台，不 clone）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/HK3DEV/examples/vps-guard/install.sh | sudo bash
+# 磁盘不是 sda：
+# curl -fsSL …/install.sh | sudo bash -s -- --disk /dev/vda
+```
+
+已 clone：
 
 ```bash
 cd CommonUserScripts/HK3DEV/examples/vps-guard
-# 磁盘不是 sda：VPS_GUARD_DISK=/dev/vda sudo ./install.sh
 sudo ./install.sh
-sudo ./setup-swap-4g.sh
-sudo ./protect-agents.sh    # 给当前 cline/claude/codex/grok 设 oom_score_adj=-800
 ```
 
 细节、三档表、Cline 会话里的 C+A 方案、**已验证打包命令**、排错命令见 [`examples/vps-guard/README.md`](examples/vps-guard/README.md)。
