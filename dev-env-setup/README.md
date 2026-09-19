@@ -138,5 +138,3 @@ CPA 官方安装器失败时，脚本解析 GitHub `releases/latest`，直下 `l
 - 不要把源仓库某台机器的 SNAPSHOT（IP、主机名、cron）当成你的环境。
 - 不要把 CPA 理解成 npm 上的 `cpa` 包。
 - 不要和 `git-autosync.sh` 同时手动 `git add` / `commit`，会撞索引锁。
-
-来源：[Gabxb/FrequentlyUsedScripts](https://github.com/Gabxb/FrequentlyUsedScripts)（源仓未附 LICENSE 文件）。改写后的 raw 路径、默认分支和工作目录归属本仓。
