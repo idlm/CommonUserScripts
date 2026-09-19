@@ -5,7 +5,7 @@
 #   wget -qO-  https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh | bash
 #
 # 管道带参必须用 bash -s --（不要漏 --）：
-#   curl -fsSL .../install.sh | bash -s -- --start
+#   curl -fsSL .../install.sh | bash -s -- --yes --install-service
 #   curl -fsSL .../install.sh | bash -s -- --help
 #
 # 环境变量：
@@ -32,6 +32,10 @@ PID_FILE="$HOME_DIR/switcher.pid"
 LOG_FILE="$HOME_DIR/switcher.log"
 CONFIG_PATH="$HOME_DIR/config.json"
 SRC_DIR="$HOME_DIR/src"
+UNIT_NAME="cline-pass-switcher.service"
+SYSTEM_UNIT="/etc/systemd/system/${UNIT_NAME}"
+USER_UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/${UNIT_NAME}"
+CLINE_PROVIDERS="${CLINE_PROVIDERS:-$HOME/.cline/data/settings/providers.json}"
 
 info()  { printf '\033[36m==>\033[0m %s\n' "$*"; }
 warn()  { printf '\033[33m!! \033[0m %s\n' "$*" >&2; }
@@ -41,22 +45,29 @@ usage() {
   cat <<'EOF'
 用法: pin-ds.sh [选项]
 
-  --start              配完后在前台启动（管道场景用 --daemon）
-  --daemon             配完后后台启动，pid 写 ~/.cline-pass-switcher/switcher.pid
-  --stop               停后台进程
-  --status             看端口 / pid / 钉住配置
+  --install-service    配完后装 systemd，enable --now（开机自启，推荐）
+  --uninstall-service  关掉开机自启并删 unit（不停改 config）
+  --pin-cline          把已登录的 Cline CLI 指到本机 :3123（只改 baseUrl / 模型）
+  --start              配完后在前台启动（管道场景用 --daemon / --install-service）
+  --daemon             配完后 nohup 后台启动（reboot 会丢，能装 systemd 请用 --install-service）
+  --stop               停 nohup；若 systemd 在跑则 systemctl stop（不 disable）
+  --status             看端口 / pid / systemd / 钉住配置
   --probe              GET 本机 /v1/models（需要已启动）
   --print-config       只打印将要写入的 config.json，不写盘
   --yes / -y           已有 config.json 时覆盖 perModel 钉住段（保留 accounts / proxyKey）
   --no-clone           已有 src/ 时不 git pull
   --help / -h          本帮助
 
-环境变量见脚本头注释。Key 不要写进 git。
+环境变量见脚本头注释。Key 不要写进 git / systemd unit。
 EOF
 }
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少 $1"
+}
+
+have_systemd() {
+  command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]
 }
 
 is_running() {
@@ -68,11 +79,89 @@ is_running() {
   return 1
 }
 
+port_pids() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnp 2>/dev/null | grep -E ":${PORT}\\b" || true
+  fi
+}
+
+systemd_kind() {
+  if [[ -f "$SYSTEM_UNIT" ]]; then
+    echo system
+  elif [[ -f "$USER_UNIT" ]]; then
+    echo user
+  else
+    echo none
+  fi
+}
+
+systemd_cmd() {
+  local kind="${1:-}"
+  shift || true
+  if [[ "$kind" == "user" ]]; then
+    systemctl --user "$@"
+  else
+    if [[ "$(id -u)" -eq 0 ]]; then
+      systemctl "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo systemctl "$@"
+    else
+      systemctl "$@"
+    fi
+  fi
+}
+
+write_via() {
+  local dest="$1"
+  if [[ "$dest" == /etc/* && "$(id -u)" -ne 0 ]]; then
+    command -v sudo >/dev/null 2>&1 || die "写 $dest 需要 root 或 sudo"
+    sudo tee "$dest" >/dev/null
+  else
+    cat > "$dest"
+  fi
+}
+
+rm_via() {
+  local dest="$1"
+  if [[ "$dest" == /etc/* && "$(id -u)" -ne 0 ]]; then
+    command -v sudo >/dev/null 2>&1 || die "删 $dest 需要 root 或 sudo"
+    sudo rm -f "$dest"
+  else
+    rm -f "$dest"
+  fi
+}
+
+pick_unit_path() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    echo "$SYSTEM_UNIT"
+  elif [[ -f "$SYSTEM_UNIT" ]]; then
+    echo "$SYSTEM_UNIT"
+  elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    echo "$SYSTEM_UNIT"
+  else
+    echo "$USER_UNIT"
+  fi
+}
+
+node_bin() {
+  local n
+  n="$(command -v node)"
+  readlink -f "$n" 2>/dev/null || echo "$n"
+}
+
 stop_daemon() {
+  local kind
+  kind="$(systemd_kind)"
+  if [[ "$kind" != none ]] && have_systemd; then
+    if systemd_cmd "$kind" is-active --quiet "$UNIT_NAME" 2>/dev/null; then
+      info "systemctl stop $UNIT_NAME  ($kind)"
+      systemd_cmd "$kind" stop "$UNIT_NAME" || true
+    fi
+  fi
   if is_running; then
     local pid
     pid="$(cat "$PID_FILE")"
-    info "停止 pid $pid"
+    info "停止 nohup pid $pid"
     kill "$pid" 2>/dev/null || true
     sleep 0.4
     if [[ -d "/proc/$pid" ]]; then
@@ -80,12 +169,15 @@ stop_daemon() {
     fi
     rm -f "$PID_FILE"
   else
-    info "没有在跑的 daemon"
     rm -f "$PID_FILE"
+    if [[ "$kind" == none ]]; then
+      info "没有在跑的 daemon"
+    fi
   fi
 }
 
 status_cmd() {
+  local kind
   printf 'home      %s\n' "$HOME_DIR"
   printf 'config    %s\n' "$CONFIG_PATH"
   printf 'src       %s\n' "$SRC_DIR"
@@ -93,9 +185,22 @@ status_cmd() {
   printf 'model     %s\n' "$MODEL"
   printf 'upstream  %s\n' "$UPSTREAM"
   if is_running; then
-    printf 'daemon    pid %s\n' "$(cat "$PID_FILE")"
+    printf 'nohup     pid %s\n' "$(cat "$PID_FILE")"
   else
-    printf 'daemon    未运行\n'
+    printf 'nohup     未运行\n'
+  fi
+  kind="$(systemd_kind)"
+  if have_systemd; then
+    if [[ "$kind" == none ]]; then
+      printf 'systemd   not-installed\n'
+    else
+      printf 'systemd   %s  enabled=%s  active=%s\n' \
+        "$kind" \
+        "$(systemd_cmd "$kind" is-enabled "$UNIT_NAME" 2>/dev/null || echo unknown)" \
+        "$(systemd_cmd "$kind" is-active "$UNIT_NAME" 2>/dev/null || echo unknown)"
+    fi
+  else
+    printf 'systemd   unavailable\n'
   fi
   if [[ -f "$CONFIG_PATH" ]]; then
     python3 - "$CONFIG_PATH" "$MODEL" <<'PY' || true
@@ -110,9 +215,17 @@ print("accounts  ", nacc, "(keys hidden)")
 print("proxyKey  ", "set" if cfg.get("proxyKey") else "empty")
 PY
   fi
-  if command -v ss >/dev/null 2>&1; then
-    ss -tlnp 2>/dev/null | grep -E ":${PORT}\\b" || true
+  if [[ -f "$CLINE_PROVIDERS" ]]; then
+    python3 - "$CLINE_PROVIDERS" <<'PY' || true
+import json, sys
+d = json.load(open(sys.argv[1]))
+st = ((d.get("providers") or {}).get("cline-pass") or {}).get("settings") or {}
+print("cline     baseUrl=", st.get("baseUrl") or "(unset)", " model=", st.get("model") or "(unset)")
+PY
+  else
+    printf 'cline     providers.json 不存在\n'
   fi
+  port_pids
 }
 
 probe_cmd() {
@@ -262,6 +375,12 @@ start_fg() {
 
 start_daemon() {
   need_cmd node
+  local kind
+  kind="$(systemd_kind)"
+  if [[ "$kind" != none ]] && have_systemd && systemd_cmd "$kind" is-active --quiet "$UNIT_NAME" 2>/dev/null; then
+    info "systemd 已在跑（$kind），不启 nohup。停掉用: systemctl stop $UNIT_NAME"
+    return
+  fi
   if is_running; then
     info "已在跑 pid $(cat "$PID_FILE")"
     return
@@ -276,10 +395,154 @@ start_daemon() {
     info "daemon pid $(cat "$PID_FILE")  log $LOG_FILE"
     info "控制台  http://${BIND}:${PORT}/"
     info "Base URL http://${BIND}:${PORT}/v1   model $MODEL"
+    warn "nohup 不能开机自启。要 reboot 也钉住： bash $0 --install-service"
   else
     rm -f "$PID_FILE"
     die "启动失败，看 $LOG_FILE"
   fi
+}
+
+render_unit() {
+  local node="$1" wanted_by="$2" user_line="$3"
+  cat <<EOF
+[Unit]
+Description=cline-pass-switcher (pin DeepSeek V4.1 Flash to Vercel deepseek)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+${user_line}
+WorkingDirectory=${HOME_DIR}
+Environment=DATA_DIR=${HOME_DIR}
+Environment=PORT=${PORT}
+Environment=BIND_HOST=${BIND}
+ExecStart=${node} ${SRC_DIR}/server.js
+Restart=always
+RestartSec=2
+StandardOutput=append:${LOG_FILE}
+StandardError=append:${LOG_FILE}
+
+[Install]
+WantedBy=${wanted_by}
+EOF
+}
+
+install_service() {
+  need_cmd node
+  [[ -f "$SRC_DIR/server.js" ]] || die "先安装源码"
+  [[ -f "$CONFIG_PATH" ]] || die "没有 config.json"
+  have_systemd || die "本机没有 systemd。改用 --daemon（reboot 不会自动拉起）"
+
+  local unit_path kind node wanted user_line
+  unit_path="$(pick_unit_path)"
+  node="$(node_bin)"
+  [[ -x "$node" ]] || die "找不到 node"
+
+  if [[ "$unit_path" == "$SYSTEM_UNIT" ]]; then
+    kind=system
+    wanted=multi-user.target
+    user_line="User=$(id -un)"
+  else
+    kind=user
+    wanted=default.target
+    user_line=""
+    mkdir -p "$(dirname "$unit_path")"
+  fi
+
+  stop_daemon
+
+  info "写入 $unit_path"
+  render_unit "$node" "$wanted" "$user_line" | write_via "$unit_path"
+
+  systemd_cmd "$kind" daemon-reload
+  systemd_cmd "$kind" enable --now "$UNIT_NAME"
+
+  if [[ "$kind" == user ]]; then
+    if command -v loginctl >/dev/null 2>&1; then
+      local linger
+      linger="$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || echo no)"
+      if [[ "$linger" != yes ]]; then
+        if [[ "$(id -u)" -eq 0 ]] || command -v sudo >/dev/null 2>&1; then
+          info "打开 linger，logout 后 user unit 也能起来"
+          if [[ "$(id -u)" -eq 0 ]]; then
+            loginctl enable-linger "$(id -un)" || warn "enable-linger 失败，reboot 可能要再登录一次"
+          else
+            sudo loginctl enable-linger "$(id -un)" || warn "enable-linger 失败，reboot 可能要再登录一次"
+          fi
+        else
+          warn "user systemd 且 Linger=no：没登录时不会拉起。有 root 时跑: loginctl enable-linger $(id -un)"
+        fi
+      fi
+    fi
+  fi
+
+  sleep 0.6
+  if systemd_cmd "$kind" is-active --quiet "$UNIT_NAME"; then
+    info "systemd $kind  $UNIT_NAME  active  enabled=$(systemd_cmd "$kind" is-enabled "$UNIT_NAME" 2>/dev/null || true)"
+    info "Base URL http://${BIND}:${PORT}/v1   model $MODEL"
+  else
+    systemd_cmd "$kind" status "$UNIT_NAME" --no-pager -l | tail -30 || true
+    die "systemd 启动失败"
+  fi
+}
+
+uninstall_service() {
+  local kind
+  kind="$(systemd_kind)"
+  if [[ "$kind" == none ]]; then
+    info "没有安装 $UNIT_NAME"
+    return
+  fi
+  have_systemd || die "没有 systemd"
+  info "disable --now $UNIT_NAME  ($kind)"
+  systemd_cmd "$kind" disable --now "$UNIT_NAME" || true
+  if [[ "$kind" == system ]]; then
+    rm_via "$SYSTEM_UNIT"
+  else
+    rm -f "$USER_UNIT"
+  fi
+  systemd_cmd "$kind" daemon-reload || true
+  info "已卸载 unit。config / src 还在 $HOME_DIR"
+}
+
+pin_cline() {
+  if [[ ! -f "$CLINE_PROVIDERS" ]]; then
+    warn "没有 $CLINE_PROVIDERS —— Cline CLI 还没登录，跳过 --pin-cline"
+    warn "登录后再跑: bash $0 --pin-cline"
+    return 0
+  fi
+  python3 - "$CLINE_PROVIDERS" "$BIND" "$PORT" "$MODEL" <<'PY'
+import json, os, shutil, sys, time
+path, bind, port, model = sys.argv[1:5]
+base = f"http://{bind}:{port}/v1"
+with open(path, encoding="utf-8") as f:
+    data = json.load(f)
+provs = data.setdefault("providers", {})
+if "cline-pass" not in provs:
+    print("!!  providers.json 里没有 cline-pass，不新建（先 cline auth 再 --pin-cline）", file=sys.stderr)
+    sys.exit(0)
+st = provs["cline-pass"].setdefault("settings", {})
+old_base = st.get("baseUrl")
+old_model = st.get("model")
+if old_base == base and old_model == model:
+    print(f"cline     已指向 {base}  model {model}")
+    sys.exit(0)
+bak = path + ".bak-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+shutil.copy2(path, bak)
+st["baseUrl"] = base
+st["model"] = model
+data["lastUsedProvider"] = "cline-pass"
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+os.replace(tmp, path)
+os.chmod(path, 0o600)
+print(f"cline     baseUrl {old_base!r} → {base}")
+print(f"cline     model   {old_model!r} → {model}")
+print(f"cline     backup  {bak}")
+PY
 }
 
 DO_START=0
@@ -288,6 +551,9 @@ DO_STOP=0
 DO_STATUS=0
 DO_PROBE=0
 DO_PRINT=0
+DO_INSTALL_SERVICE=0
+DO_UNINSTALL_SERVICE=0
+DO_PIN_CLINE=0
 YES=0
 NO_CLONE=0
 
@@ -299,6 +565,9 @@ while [[ $# -gt 0 ]]; do
     --status) DO_STATUS=1 ;;
     --probe) DO_PROBE=1 ;;
     --print-config) DO_PRINT=1 ;;
+    --install-service) DO_INSTALL_SERVICE=1 ;;
+    --uninstall-service) DO_UNINSTALL_SERVICE=1 ;;
+    --pin-cline) DO_PIN_CLINE=1 ;;
     --yes|-y) YES=1 ;;
     --no-clone) NO_CLONE=1 ;;
     --help|-h) usage; exit 0 ;;
@@ -307,6 +576,10 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+if [[ "$DO_UNINSTALL_SERVICE" == 1 ]]; then
+  uninstall_service
+  exit 0
+fi
 if [[ "$DO_STOP" == 1 ]]; then
   stop_daemon
   exit 0
@@ -325,6 +598,12 @@ if [[ "$DO_PRINT" == 1 ]]; then
   exit 0
 fi
 
+# 只改 Cline CLI 指向，不动 switcher 安装
+if [[ "$DO_PIN_CLINE" == 1 && "$DO_START" != 1 && "$DO_DAEMON" != 1 && "$DO_INSTALL_SERVICE" != 1 ]]; then
+  pin_cline
+  exit 0
+fi
+
 need_cmd python3
 need_cmd node
 command -v git >/dev/null 2>&1 || die "缺少 git（用来拉 cline-pass-switcher）"
@@ -334,21 +613,29 @@ NODE_MAJ="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
 clone_switcher
 write_config
 
-if [[ "$DO_START" == 1 ]]; then
+if [[ "$DO_INSTALL_SERVICE" == 1 ]]; then
+  install_service
+elif [[ "$DO_START" == 1 ]]; then
   start_fg
 elif [[ "$DO_DAEMON" == 1 ]]; then
   start_daemon
 else
   info "源码 $SRC_DIR"
   info "配置 $CONFIG_PATH"
-  info "启动："
-  printf '  DATA_DIR=%q PORT=%q BIND_HOST=%q node %q\n' "$HOME_DIR" "$PORT" "$BIND" "$SRC_DIR/server.js"
-  info "或："
+  info "开机自启（推荐）："
+  echo "  bash $0 --install-service"
+  info "或临时后台："
   echo "  bash $0 --daemon"
   info "客户端："
   echo "  Base URL  http://${BIND}:${PORT}/v1"
   echo "  Model     $MODEL"
   echo "  API Key   控制台「访问与安全」的 proxyKey；本地空 = 不鉴权"
+  info "Cline CLI 已登录时："
+  echo "  bash $0 --pin-cline"
   info "Cline Pass 上游 Key 用环境变量 CLINE_PASS_KEY 或打开 http://${BIND}:${PORT}/ 在账号管理里填。"
   info "官方 /v1/models 不含 cline-pass/*，模型清单以本目录 examples/pi-models.json 为准。"
+fi
+
+if [[ "$DO_PIN_CLINE" == 1 ]]; then
+  pin_cline
 fi

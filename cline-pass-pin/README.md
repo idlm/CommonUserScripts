@@ -19,15 +19,16 @@
 随机路由会把同一会话打到不同上游，缓存率崩；钉住同一条渠道，缓存立刻上去。
 
 ```
-status   PIN TEMPLATE + INSTALLER
+status   PIN TEMPLATE + INSTALLER + systemd
 model    cline-pass/deepseek-v4.1-flash
 pipe     planner  →  Vercel AI Gateway  →  deepseek
 listen   127.0.0.1:3123   （仅方法 A / CPA 走 switcher 时）
+boot     systemd enable --now   （--install-service）
 policy   下文测试 Key 按你的要求明文写入，推 public 仓前删掉
 ```
 
 本目录 **不 vendoring** [cline-pass-switcher](https://github.com/munmunjaklin458-afk/cline-pass-switcher)（MIT，零 npm 依赖，Node ≥ 18）。
-一键脚本只 clone 上游、写本机 `config.json` 的 `perModel` 钉住段。无利益相关。
+一键脚本 clone 上游、写 `perModel` 钉住段、可选装 systemd、可选把 Cline CLI 指到本机代理。无利益相关。
 
 switcher 作者原话：软件 **只是帮你往请求里加钉上游的字段**。
 agent / CPA / 任何能改 chat body 的客户端，自己加下面这一段，就不用装代理。
@@ -38,8 +39,87 @@ agent / CPA / 任何能改 chat body 的客户端，自己加下面这一段，�
 
 ---
 
+## 本机已跑通（推荐这一条）
+
+2026-09-19 在这台机上实测成功：
+
+```
+Cline CLI（已登录 OAuth）
+   │  baseUrl = http://127.0.0.1:3123/v1
+   │  model   = cline-pass/deepseek-v4.1-flash
+   ▼
+systemd  cline-pass-switcher.service     reboot 自己起来
+   │  注入 providerOptions.gateway.only = ["deepseek"]
+   ▼
+api.cline.bot  →  finalProvider = deepseek
+第二轮相同长前缀  →  cached_tokens 有数字（缓存命中）
+```
+
+Cline CLI **没有** requestBodyExtras，不能自己钉。所以本机只改两处：switcher 注入字段，CLI 的 Base URL 指 `:3123`。OAuth JWT 仍打到本机，switcher 再用 `sk_` 打官方。
+
+```bash
+export CLINE_PASS_KEY='sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec'
+
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh \
+  | bash -s -- --yes --install-service --pin-cline
+```
+
+```bash
+wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh \
+  | bash -s -- --yes --install-service --pin-cline
+```
+
+本仓工作树：
+
+```bash
+CLINE_PASS_KEY='sk_…' bash cline-pass-pin/install.sh --yes --install-service --pin-cline
+```
+
+做了什么：
+
+| 步 | 动作 |
+|:--|:--|
+| 1 | clone switcher → `~/.cline-pass-switcher/src` |
+| 2 | 写 `config.json`：`perModel[flash].upstreams=["deepseek"]` `pinMode=strict` |
+| 3 | 停掉旧 nohup，装 `/etc/systemd/system/cline-pass-switcher.service`，`enable --now` |
+| 4 | 已登录的 Cline CLI：只改 `providers.json` 的 `baseUrl` + `model`（OAuth 不动） |
+
+装完自检：
+
+```bash
+bash cline-pass-pin/pin-ds.sh --status
+bash cline-pass-pin/pin-ds.sh --probe
+systemctl is-enabled cline-pass-switcher    # enabled
+ss -ltnp | grep 3123                        # 127.0.0.1:3123
+```
+
+`sk_` 只活在 `~/.cline-pass-switcher/config.json`（chmod 600），**不写进 systemd unit**。
+
+停开机自启：`systemctl disable --now cline-pass-switcher`，或 `bash pin-ds.sh --uninstall-service`。
+
+---
+
+## 其它办法（一眼看完）
+
+目标只有一件事：让 chat body 带上 `providerOptions.gateway.only: ["deepseek"]`。选你客户端做得到的那条。
+
+| 谁 | 怎么做 | 要不要装 switcher |
+|:--|:--|:--|
+| **Cline CLI / VSCode** | 一键 `--install-service --pin-cline`（上面那条） | 要。CLI 不会改 body |
+| **pi / SDK / 能塞 extras 的 agent** | Base URL 直连官方，body 加 extras | 不要 |
+| **Codex CLI** | 另加 `wire_api="chat"` 的 provider，Base URL 指 `:3123/v1` | 要。Codex 没有 extras |
+| **Claude Code** | 必须 CPA `:8317` → switcher `:3123`（Anthropic 协议，不能直连） | 要 + CPA |
+| **已有 CPA** | `openai-compatibility.base-url` 指 `:3123/v1`（C2） | 要。CPA 不会自己注入 |
+| **curl 自检** | POST 官方，JSON 里直接带 `providerOptions` | 不要 |
+
+细节：[方法 A](#方法-a--本机-switcher一键) · [方法 B](#方法-b--agent--provider-自己钉) · [方法 C](#方法-c--cpacliproxyapi接到-cline-pass) · [方法 D](#方法-d--curl-直连自检) · [Codex / Claude](#最简方案codex--claude-code)
+
+---
+
 ## 目录
 
+- [本机已跑通（推荐这一条）](#本机已跑通推荐这一条)
+- [其它办法（一眼看完）](#其它办法一眼看完)
 - [实测：能不能钉住](#实测能不能钉住)
 - [这解决什么问题](#这解决什么问题)
 - [最简方案：Codex / Claude Code](#最简方案codex--claude-code)
@@ -136,10 +216,12 @@ Codex        ──►  switcher :3123/v1  （wire_api=chat，可跳过 CPA）
 ```bash
 export CLINE_PASS_KEY='sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec'
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh \
-  | bash -s -- --yes --daemon
+  | bash -s -- --yes --install-service
 ```
 
-本机已 clone 时：`CLINE_PASS_KEY='…' bash cline-pass-pin/pin-ds.sh --yes --daemon`
+本机已 clone 时：`CLINE_PASS_KEY='…' bash cline-pass-pin/pin-ds.sh --yes --install-service`
+
+没有 systemd 才用 `--daemon`（reboot 会丢）。
 
 ### 1. Codex：只改 `~/.codex/config.toml`
 
@@ -265,8 +347,8 @@ Codex / Claude Code 同样没有 extras，走 [最简方案](#最简方案codex-
 
 适合：Cline 扩展 / CLI、不会改 body 的客户端、想在控制台里看实际命中渠道。
 
-1. 跑下面的 [一条命令](#一条命令curl--wget)（或 `bash pin-ds.sh --daemon`）。
-2. 客户端改三处：
+1. 跑下面的 [一条命令](#一条命令curl--wget)：`--install-service` 装 systemd 开机自启。Cline CLI 已登录再加 `--pin-cline`。
+2. 不会改 body 的客户端改三处：
 
 ```
 Base URL    http://127.0.0.1:3123/v1
@@ -275,6 +357,7 @@ Model       cline-pass/deepseek-v4.1-flash
 ```
 
 3. 上游 `sk_` 用环境变量 `CLINE_PASS_KEY` 或打开 <http://127.0.0.1:3123/> 在「账号管理」粘贴。
+4. Cline CLI 片段：[`examples/cline-cli-providers.snippet.json`](examples/cline-cli-providers.snippet.json)（只改 `baseUrl` / `model`，OAuth 不动）。
 
 switcher 按 `perModel[模型].upstreams = ["deepseek"]` + `pinMode: strict` 注入 planner 字段，
 响应头里能看到 `X-Cline-Target-Upstream` / `X-Cline-Actual-Upstream`。
@@ -438,6 +521,7 @@ planningReasoning 含 "Provider set restricted to: deepseek"
 ## 一条命令（curl / wget）
 
 不 clone 本仓。脚本会：检查 Node ≥ 18 → clone switcher → 写 `~/.cline-pass-switcher/config.json`（钉 `deepseek` / strict）。
+推荐直接 `--install-service`（systemd 开机自启）。Cline CLI 已登录再加 `--pin-cline`。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh | bash
@@ -451,7 +535,7 @@ wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pa
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh \
-  | bash -s -- --daemon
+  | bash -s -- --yes --install-service --pin-cline
 ```
 
 ```bash
@@ -468,12 +552,15 @@ curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-p
 装完填 Key、启动：
 
 ```bash
-# 方式 A：环境变量（推荐管道场景）
+# 推荐：环境变量 + systemd 开机自启 + 把已登录的 Cline CLI 指过来
 CLINE_PASS_KEY='sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec' \
   curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh \
-  | bash -s -- --yes --daemon
+  | bash -s -- --yes --install-service --pin-cline
 
-# 方式 B：先装后开控制台填
+# 没有 systemd 才用 --daemon（reboot 会丢）
+# CLINE_PASS_KEY='sk_…' … | bash -s -- --yes --daemon
+
+# 先装后开控制台填 Key
 DATA_DIR="$HOME/.cline-pass-switcher" \
   node "$HOME/.cline-pass-switcher/src/server.js"
 # 浏览器打开 http://127.0.0.1:3123/  → 账号管理 → 粘贴 Cline Pass Key
@@ -482,7 +569,7 @@ DATA_DIR="$HOME/.cline-pass-switcher" \
 本地已 clone 本仓时：
 
 ```bash
-bash cline-pass-pin/install.sh --daemon
+bash cline-pass-pin/install.sh --yes --install-service --pin-cline
 # 或直接
 bash cline-pass-pin/pin-ds.sh --help
 ```
@@ -526,10 +613,13 @@ curl -fsS https://api.cline.bot/api/v1/chat/completions \
 | 选项 | 作用 |
 |:--|:--|
 | （无） | clone + 写 config，打印启动命令 |
-| `--daemon` | 配完后台启动，pid → `~/.cline-pass-switcher/switcher.pid` |
+| `--install-service` | 配完装 systemd，`enable --now`（开机自启，推荐） |
+| `--uninstall-service` | 关掉开机自启并删 unit（config / src 保留） |
+| `--pin-cline` | 已登录的 Cline CLI：只改 `providers.json` 的 `baseUrl` / `model` |
+| `--daemon` | nohup 后台；reboot 会丢。能装 systemd 请用 `--install-service` |
 | `--start` | 配完前台启动（管道里别用，stdin 已被占用） |
-| `--stop` | 停 daemon |
-| `--status` | 端口 / pid / 钉住段（不打印 Key） |
+| `--stop` | 停 nohup；若 systemd 在跑则 `systemctl stop`（不 disable） |
+| `--status` | 端口 / nohup / systemd / 钉住段 / Cline baseUrl（不打印 Key） |
 | `--probe` | `GET http://127.0.0.1:3123/v1/models` |
 | `--print-config` | 打印将要写入的 JSON，不写盘 |
 | `--yes` / `-y` | 已有 config 时覆盖 `perModel` / 端口（**保留 accounts / proxyKey**） |
@@ -585,14 +675,16 @@ cacheRead 比 input 便宜两个数量级——这就是为什么要钉死同一
 cline-pass-pin/
 ├── README.md                              本文件
 ├── install.sh                             curl/wget 入口（再拉 pin-ds.sh）
-├── pin-ds.sh                              clone switcher + 写钉住 config + 启停
+├── pin-ds.sh                              clone + 写钉住 config + systemd / Cline CLI
 └── examples/
     ├── pi-models.json                     pi 的 clinepass provider 块
     ├── config.ds-v4.1-flash.json          switcher 本机配置模板（无 Key）
     ├── provider-snippet.json              走代理 vs 直连自钉
     ├── cpa-cline-pass.yaml                CPA openai-compatibility 片段
     ├── codex-clinepass.toml               ~/.codex/config.toml 追加块
-    └── claude-settings.env.json           Claude settings.json 的 env 片段
+    ├── claude-settings.env.json           Claude settings.json 的 env 片段
+    ├── cline-cli-providers.snippet.json   Cline CLI 只改 baseUrl / 模型
+    └── cline-pass-switcher.service        systemd 模板（无 Key）
 ```
 
 本机装完（不进 git）：
@@ -601,7 +693,7 @@ cline-pass-pin/
 ~/.cline-pass-switcher/
 ├── config.json          含 accounts[].key，chmod 600
 ├── src/                 munmunjaklin458-afk/cline-pass-switcher 的 clone
-├── switcher.pid
+├── switcher.pid         仅 --daemon；systemd 不管这个文件
 └── switcher.log
 ```
 
@@ -616,7 +708,7 @@ cline-pass-pin/
 5. **Claude Code**：[`examples/claude-settings.env.json`](examples/claude-settings.env.json) 合进 `~/.claude/settings.json` 的 `env`。必须先有 CPA。见最简方案。
 6. **CPA**：见方法 C。文档 [help.router-for.me](https://help.router-for.me/cn/)。
 7. **dsh-cline-pass**（[yhshzh/dsh-cline-pass](https://github.com/yhshzh/dsh-cline-pass)）是 dsh 插件，渠道逻辑可参考；本仓主路径是 switcher + provider extras，不是 dsh。
-8. **systemd / 开机自启**：本脚本不装 unit。要常驻用 `--daemon` 或自己写 systemd，`Environment=DATA_DIR=... BIND_HOST=127.0.0.1 PORT=3123`。
+8. **systemd / 开机自启**：`--install-service`。root 写 `/etc/systemd/system/cline-pass-switcher.service`；非 root 写 user unit，必要时 `loginctl enable-linger`。模板：[`examples/cline-pass-switcher.service`](examples/cline-pass-switcher.service)。**不要把 sk_ 写进 unit。**
 9. **Docker**：看上游 switcher 的 compose，不是本目录范围。
 10. 管道归属由 Cline 侧决定、可能再变。控制台「探测」会刷新每个模型的管道类型与渠道清单。ds-v4.1-flash 目前是 planner。
 
@@ -650,6 +742,8 @@ if (pipeline === 'planner' || pipeline === null) {
 ✗  把 Codex 现有的 wire_api="responses" 抄去打 Cline Pass（要用 chat）
 ✗  把 Cline 的 sk_ 填进 Claude settings 或 Codex config.toml
 ✗  改 HK3DEV 那条远端 :8317 当 Cline Pass（那边是 Codex 中转）
+✗  systemd 已经在跑还再 --daemon（会抢 3123）
+✗  把 sk_ 写进 systemd unit / Environment=
 ```
 
 ---

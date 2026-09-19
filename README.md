@@ -209,10 +209,11 @@ D  curl 自检                        max_tokens >= 256，看 provider_metadata
 CPA **不会**自己注入钉住字段。`openai-compatibility.base-url` 指官方或本机 switcher，
 `sk_` 是 Cline 的，不要和 CPA `api-keys` 搞混。片段：`cline-pass-pin/examples/cpa-cline-pass.yaml`
 
-**Codex / Claude Code 最简**（两边都没有 requestBodyExtras，Claude 还是 Anthropic 协议）：
+**本机已跑通（Cline CLI）**：systemd 管 `:3123`，CLI `baseUrl` 指代理，模型 flash，`finalProvider=deepseek`，长前缀第二轮有 `cached_tokens`。
 
 ```
-1. 装 switcher（--daemon），sk_ 只给 CLINE_PASS_KEY
+1. 装 switcher（--install-service，开机自启），sk_ 只给 CLINE_PASS_KEY
+   Cline CLI 已登录再加 --pin-cline
 2. Codex：~/.codex/config.toml 新加 provider
      base_url = "http://127.0.0.1:3123/v1"
      wire_api = "chat"          # 不要抄现有的 responses
@@ -225,7 +226,7 @@ CPA **不会**自己注入钉住字段。`openai-compatibility.base-url` 指官�
 ```
 
 不要改现网的 anyrouter / runanytime；这是另开一条。远端 HK3DEV `:8317` 不是 Cline Pass。
-测试 Key 和逐文件改法：[`cline-pass-pin/`](cline-pass-pin/) →「最简方案」「客户端怎么指」。推仓前把 Key 从模块 README 删掉。
+测试 Key 和逐文件改法：[`cline-pass-pin/`](cline-pass-pin/) →「本机已跑通」「其它办法」。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh | bash
@@ -237,7 +238,7 @@ wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pa
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh \
-  | bash -s -- --daemon
+  | bash -s -- --yes --install-service --pin-cline
 ```
 
 客户端：`Base URL http://127.0.0.1:3123/v1`，模型 `cline-pass/deepseek-v4.1-flash`。

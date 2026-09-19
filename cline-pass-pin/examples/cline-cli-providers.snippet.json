@@ -1,0 +1,12 @@
+{
+  "_comment": "Cline CLI 没有 requestBodyExtras。已登录后只改 ~/.cline/data/settings/providers.json 里 cline-pass.settings 的这两项，OAuth 不动。脚本 --pin-cline 做同一件事。",
+  "providers": {
+    "cline-pass": {
+      "settings": {
+        "baseUrl": "http://127.0.0.1:3123/v1",
+        "model": "cline-pass/deepseek-v4.1-flash"
+      }
+    }
+  },
+  "lastUsedProvider": "cline-pass"
+}

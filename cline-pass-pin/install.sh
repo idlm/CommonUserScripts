@@ -5,7 +5,7 @@
 #   wget -qO-  https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh | bash
 #
 # 管道带参必须用 bash -s --（不要漏 --）：
-#   curl -fsSL .../install.sh | bash -s -- --daemon
+#   curl -fsSL .../install.sh | bash -s -- --yes --install-service --pin-cline
 #   wget -qO-  .../install.sh | bash -s -- --help
 #
 # 环境变量 CLINE_PASS_PIN_RAW_BASE 可覆盖 raw 根地址（测试用）。
