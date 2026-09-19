@@ -116,10 +116,164 @@ ss -ltnp | grep 3123                        # 127.0.0.1:3123
 
 ---
 
+## 只改配置文件：谁行、谁不行、不行怎么办
+
+判定就一条：**客户端能不能把这段塞进 chat JSON body**。能 = 只改配置，直连官方。不能 = 前面必须垫一层会注入这段的东西。
+
+```json
+"providerOptions": { "gateway": { "only": ["deepseek"] } }
+```
+
+顶层 `provider.only` 不算。HTTP header 不算。改 Base URL 本身也不算钉住。
+
+### 行：只改 agent 配置，不装任何代理
+
+| 客户端 | 改哪个文件 | 贴什么 |
+|:--|:--|:--|
+| **pi** | models 配置里的 `clinepass` 块 | [`examples/pi-models.json`](examples/pi-models.json)。flash 那条已带 `requestBodyExtras`。只改 `apiKey`。 |
+| **任意能塞 extras 的 agent** | provider 的 `requestBodyExtras` / `extraBody` | [`examples/provider-snippet.json`](examples/provider-snippet.json) 的 `clinepass_direct_pin_vercel` |
+| **OpenAI Python SDK** | 调用处，不是独立配置文件 | `extra_body={"providerOptions": {"gateway": {"only": ["deepseek"]}}}` |
+| **OpenAI JS SDK** | 调用处 | body 里加 `providerOptions` |
+| **curl / 任意 HTTP** | 请求 JSON | 见 [方法 D](#方法-d--curl-直连自检) |
+
+通用最小块（Base URL 直连官方，Key 用 Cline 账户设置的 `sk_`）：
+
+```json
+{
+  "baseUrl": "https://api.cline.bot/api/v1",
+  "apiKey": "sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec",
+  "requestBodyExtras": {
+    "providerOptions": {
+      "gateway": { "only": ["deepseek"] }
+    }
+  }
+}
+```
+
+模型手写 `cline-pass/deepseek-v4.1-flash`（官方 `/v1/models` 没有这个前缀）。
+
+extras **只给 flash**。glm / kimi / qwen 不要共用同一个带 `only: ["deepseek"]` 的 provider，否则网关 400。
+
+### 不行：配置文件里没有 extras 旋钮
+
+这三家 **改自己的配置文件钉不住**。原因和解决办法如下。不要在它们的配置里找 `providerOptions` / `requestBodyExtras`——没有。
+
+| 客户端 | 为什么不行 | 解决办法（改哪些文件） |
+|:--|:--|:--|
+| **Cline CLI / VSCode** | 没有 `requestBodyExtras`。本机登录走 OAuth JWT，不是 `sk_`。 | 1. 装 switcher（注入 extras）。2. 只改 `~/.cline/data/settings/providers.json` 的 `cline-pass.settings.baseUrl` + `model`。OAuth 不动。 |
+| **Codex CLI** | 没有 extras。默认 `wire_api=responses`，Cline Pass 是 chat completions。 | 1. 装 switcher。2. `~/.codex/config.toml` **另加**一块 `wire_api="chat"` 的 provider，`base_url` 指 `:3123/v1`。现网 anyrouter **不要改**。 |
+| **Claude Code** | 没有 extras，协议还是 Anthropic `/v1/messages`。Cline Pass 是 OpenAI chat。**不能直连** `:3123` 或官方。 | 1. 装 switcher。2. 装 CPA。3. CPA `config.yaml` 的 `base-url` 指 `:3123/v1`。4. `~/.claude/settings.json` 的 `env` 指 CPA `:8317`。 |
+
+下面是这三家各自要改的配置（可拷贝）。**先把 switcher 拉起来**（一键 `--install-service`），再改客户端文件。
+
+#### 1. Cline CLI / VSCode — 解决办法
+
+一键（已登录时）：
+
+```bash
+export CLINE_PASS_KEY='sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec'
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh \
+  | bash -s -- --yes --install-service --pin-cline
+```
+
+手改只动这两项（完整片段 [`examples/cline-cli-providers.snippet.json`](examples/cline-cli-providers.snippet.json)）：
+
+```json
+{
+  "providers": {
+    "cline-pass": {
+      "settings": {
+        "baseUrl": "http://127.0.0.1:3123/v1",
+        "model": "cline-pass/deepseek-v4.1-flash"
+      }
+    }
+  },
+  "lastUsedProvider": "cline-pass"
+}
+```
+
+文件：`~/.cline/data/settings/providers.json`。不要动 `accessToken` / `refreshToken`。没有 `cline-pass` 块就先 `cline auth`，不要手建空账号。
+
+#### 2. Codex CLI — 解决办法
+
+`~/.codex/config.toml` **另加**一块，不要改现有的 `any` / `cpa`（完整 [`examples/codex-clinepass.toml`](examples/codex-clinepass.toml)）：
+
+```toml
+[model_providers.clinepass]
+name = "ClinePass"
+base_url = "http://127.0.0.1:3123/v1"
+wire_api = "chat"
+temp_env_key = "CLINE_PASS_PROXY_KEY"
+requires_openai_auth = true
+```
+
+```bash
+export CLINE_PASS_PROXY_KEY=local
+codex -c model_provider="clinepass" -c model="cline-pass/deepseek-v4.1-flash"
+```
+
+`sk_` 只给 switcher（`CLINE_PASS_KEY`），不要写进 `config.toml` / `auth.json`。`wire_api` 必须是 `chat`，抄现网的 `responses` 会打不通。
+
+#### 3. Claude Code — 解决办法
+
+两层，缺一层都不行。
+
+**CPA `config.yaml`**（指 switcher，不是官方；完整 [`examples/cpa-cline-pass.yaml`](examples/cpa-cline-pass.yaml)）：
+
+```yaml
+api-keys:
+  - "cpa-local"
+openai-compatibility:
+  - name: "cline-pass"
+    base-url: "http://127.0.0.1:3123/v1"
+    api-key-entries:
+      - api-key: "local"
+    models:
+      - name: "cline-pass/deepseek-v4.1-flash"
+        alias: "ds-flash"
+```
+
+**`~/.claude/settings.json` 的 `env`** 只改这几项（完整 [`examples/claude-settings.env.json`](examples/claude-settings.env.json)）：
+
+```json
+{
+  "ANTHROPIC_BASE_URL": "http://127.0.0.1:8317",
+  "ANTHROPIC_API_KEY": "cpa-local",
+  "ANTHROPIC_MODEL": "ds-flash",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL": "ds-flash",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL": "ds-flash",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL": "ds-flash"
+}
+```
+
+| 钥匙 | 写在哪 | 值 |
+|:--|:--|:--|
+| Cline `sk_` | switcher `accounts[].key` / `CLINE_PASS_KEY` | 账户设置创建 |
+| switcher `proxyKey` | CPA `api-key-entries` | 本地空鉴权随便填 |
+| CPA `api-keys` | Claude `ANTHROPIC_API_KEY` | 上例 `cpa-local` |
+
+`ANTHROPIC_BASE_URL` **不要**直接指 `http://127.0.0.1:3123`（协议不对）。也不要指官方 `api.cline.bot`。
+
+已有 CPA、下游是 OpenAI chat 且自己能塞 extras：可以 C1 直连官方（见方法 C）。Claude Code 重建 body，extras 会丢，**必须 C2**。
+
+### 对照：三家不行的，不要做的事
+
+```
+✗  在 Cline providers.json 里找 requestBodyExtras
+✗  在 Codex config.toml 里写 providerOptions / extra_body
+✗  把 Claude ANTHROPIC_BASE_URL 指 127.0.0.1:3123 或 api.cline.bot
+✗  给 Codex 抄现网的 wire_api = "responses"
+✗  改现网 anyrouter / runanytime 来接 Cline Pass（另开一条）
+✗  以为改了 Base URL 就等于钉住了（没 extras / 没 switcher = 仍随机路由）
+```
+
+---
+
 ## 目录
 
 - [本机已跑通（推荐这一条）](#本机已跑通推荐这一条)
 - [其它办法（一眼看完）](#其它办法一眼看完)
+- [只改配置文件：谁行、谁不行、不行怎么办](#只改配置文件谁行谁不行不行怎么办)
 - [实测：能不能钉住](#实测能不能钉住)
 - [这解决什么问题](#这解决什么问题)
 - [最简方案：Codex / Claude Code](#最简方案codex--claude-code)

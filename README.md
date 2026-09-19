@@ -225,8 +225,19 @@ CPA **不会**自己注入钉住字段。`openai-compatibility.base-url` 指官�
      ANTHROPIC_MODEL=ds-flash
 ```
 
+**只改配置、不装代理**：pi / SDK / 能塞 `requestBodyExtras` 的 agent 直连官方，body 加 `providerOptions.gateway.only = ["deepseek"]`。
+
+**改自己的配置钉不住**（没有 extras）：Cline CLI、Codex、Claude Code。解决办法：
+
+```
+Cline CLI   装 switcher + 改 providers.json 的 baseUrl/model（--pin-cline）
+Codex       装 switcher + config.toml 另加 wire_api=chat 的 provider
+Claude      装 switcher + CPA；settings.json 指 :8317，CPA 指 :3123
+            不要把 ANTHROPIC_BASE_URL 直接指 :3123
+```
+
 不要改现网的 anyrouter / runanytime；这是另开一条。远端 HK3DEV `:8317` 不是 Cline Pass。
-测试 Key 和逐文件改法：[`cline-pass-pin/`](cline-pass-pin/) →「本机已跑通」「其它办法」。
+谁行谁不行、逐文件改法：[`cline-pass-pin/`](cline-pass-pin/) →「只改配置文件」。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh | bash
