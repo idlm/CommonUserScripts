@@ -1,0 +1,9 @@
+[Unit]
+Description=VPS occupancy guard (tighten cgroup caps when load/mem/io spike)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vps-guard.sh
+Nice=10
+IOSchedulingClass=idle

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run VPS occupancy guard every 30s
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=vps-guard.service
+
+[Install]
+WantedBy=timers.target

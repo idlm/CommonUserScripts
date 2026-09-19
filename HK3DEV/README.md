@@ -36,7 +36,7 @@ policy   复制 examples → 本机路径，再自己填 Key
 
 ```
 HK3DEV/
-├── README.md                              本文件：主机 + 服务 + 怎么复用
+├── README.md                              本文件：主机 + 服务 + 事故 + 怎么复用
 └── examples/
     ├── bashrc.snippet.sh                  ~/.bashrc 里 grok 段
     ├── gitconfig.example                  ~/.gitconfig
@@ -44,7 +44,14 @@ HK3DEV/
     ├── grok-config.toml.example           ~/.grok/config.toml
     ├── claude-settings.example.json       ~/.claude/settings.json
     ├── claude-config.json.example         ~/.claude/config.json
-    └── CLAUDE.md.example                  ~/.claude/CLAUDE.md
+    ├── CLAUDE.md.example                  ~/.claude/CLAUDE.md
+    └── vps-guard/                         整机 I/O + 内存看门狗（见 §07）
+        ├── README.md
+        ├── install.sh
+        ├── setup-swap-4g.sh
+        ├── vps-guard.sh
+        ├── vps-guard.service / .timer
+        └── *.conf                         systemd drop-in 模板
 ```
 
 不进 git（本机有、这里故意没有）：
@@ -66,8 +73,10 @@ HK3DEV/
 hostname     3HK
 virt         QEMU Virtual CPU version 2.5+     (qemu-guest-agent 在跑)
 cpu          4 vCPU
-mem          3.8 Gi  ·  swap 无
-disk         /dev/sda1  40G  ·  约 56%
+mem          3.8 Gi  ·  swap /swapfile 4G（2026-09-19 加；此前为 0）
+disk         /dev/sda1  40G  ·  约 60%
+cgroup       v2 · io/cpu/memory 委派到 user.slice + system.slice
+io cap       基线每 slice 24M（合计 ~48M）；high 16M+16M；emergency 12M+12M
 nic          eth0  10.69.134.135/24
 gw           10.69.134.254
 dns pin      1.1.1.1  8.8.8.8  via dhcp
@@ -111,9 +120,11 @@ atop.service
 atopacct.service
 unattended-upgrades.service
 systemd-networkd / resolved / timesyncd
+vps-guard.timer                    # 30s 占用看门狗，见 §07
+cline-pass-switcher.service        # 127.0.0.1:3123，配置不进本目录
 ```
 
-enabled 且相关：`ssh` `cron` `postgresql` `redis-server` `exim4` `atop` `unattended-upgrades` `cloud-init*`。
+enabled 且相关：`ssh` `cron` `postgresql` `redis-server` `exim4` `atop` `unattended-upgrades` `cloud-init*` `vps-guard.timer`。
 
 用户 crontab：**空**。`/etc/cron.d` 有 `atop` `e2scrub_all` `sysstat`。
 
@@ -247,6 +258,9 @@ apt-get update
 apt-get install -y git curl wget screen htop btop nano \
   openssh-server postgresql-17 redis-server
 
+# 0b. 4G 内存机：swap + 整机 I/O 看门狗（见 §07）
+# cd CommonUserScripts/HK3DEV/examples/vps-guard && sudo ./install.sh && sudo ./setup-swap-4g.sh
+
 # 1. AI CLI：走本仓 dev-env-setup，或 npm 全局
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/dev-env-setup/setupv11.sh \
   | bash -s -- --yes --items nano,htop,btop,screen,claude,codex,grok
@@ -321,6 +335,67 @@ Key 占位，URL 保留本机值 `https://x-api.cfd/v1`。
 
 ---
 
+## 07  ·  事故：Cline 打满磁盘 → 限 I/O → 看门狗过紧 OOM
+
+采集日当天的因果链。数字来自本机 dmesg / cgroup / `free`，换机器请重测。
+
+### 发现
+
+1. **Cline 会话把磁盘 I/O 打爆。** 观测到当前 60.5 / 峰值 96.4 / 平均 34.7 MiB/s。4 vCPU + 单盘 QEMU 虚拟机在这个量级会直接卡住 SSH。
+2. **用户要求整机 30–40 MiB/s，不是每个 slice 各 35。** 两个顶层 slice 的带宽要加总。
+3. **root cgroup 写 `io.max` 失败。** `io` 已通过 `cgroup.subtree_control` 委派，`/sys/fs/cgroup/io.max` 不存在或 `Permission denied`。所谓“全局”只能落在 `user.slice` + `system.slice`。
+4. **第一版看门狗过紧，把 Cline 自己杀掉。** 无 swap、`MemorySwapMax=0`、`user.slice` `MemoryMax` 一度压到 ~2.2G / 紧急档 1.4G，再叠加每 tick `drop_caches`。20:01:15 dmesg：`oom-kill` `CONSTRAINT_MEMCG` 约束 `/user.slice`，先杀 `7za`（anon ~1.1G），再杀 `cline`（当时 usage 2791MB vs limit 2662MB）。会话 `terminal_marker=failed_external_process_exit`。不是模型、不是 pin、不是 OAuth。
+5. **`user-0.slice` 再写一份 `io.max` 会叠乘。** 清掉子 slice 的独立限速，只留顶层。
+
+### 解决
+
+| 步骤 | 做法 | 为什么 |
+|:--|:--|:--|
+| 会计 | `DefaultIOAccounting/CPUAccounting/MemoryAccounting=yes` | 没有 accounting，slice 的 BandwidthMax 不生效 |
+| 基线限速 | `user.slice` 24M + `system.slice` 24M，设备 `8:0` = `/dev/sda` | 合计落在「略宽于 30–40」；看门狗再往下压 |
+| 看门狗 | `vps-guard.timer` 每 30s 读 PSI / load / MemAvailable% | 冲高再收紧，不杀进程、不动 AI 钉死 |
+| 滞回 | 进入/退出阈值分离 + 连续 2 tick 确认 | 消除 ok↔high↔emergency 抖动 |
+| drop_caches | 仅 emergency，且间隔 ≥ 900s | 第一次每 tick drop，page cache 被打空，I/O 更炸 |
+| 内存上限 | user `MemoryMax=3600M` / high 3400M / emergency 3200M | 给 Cline + 压缩任务留空间 |
+| swap | `/swapfile` 4G + fstab；`memory.swap.max=max` | 无 swap 时 MemoryMax 是硬杀；`MemorySwapMax=0` 等于没加 |
+
+落地文件（本机路径 → 本目录模板）：
+
+```
+/usr/local/sbin/vps-guard.sh
+/etc/systemd/system/vps-guard.{service,timer}
+/etc/systemd/system.conf.d/io-accounting.conf
+/etc/systemd/system/user.slice.d/{io-controller,resource-guard}.conf
+/etc/systemd/system/system.slice.d/resource-guard.conf
+/swapfile + /etc/fstab 一行
+```
+
+新机：
+
+```bash
+cd CommonUserScripts/HK3DEV/examples/vps-guard
+# 磁盘不是 sda：VPS_GUARD_DISK=/dev/vda sudo ./install.sh
+sudo ./install.sh
+sudo ./setup-swap-4g.sh
+```
+
+细节、三档表、排错命令见 [`examples/vps-guard/README.md`](examples/vps-guard/README.md)。
+
+### 验证（本机 2026-09-19 晚）
+
+```
+swap           4.0G  ·  used 0
+memory.swap.max  user=max  system=max
+vps-guard.timer  active
+vps-guard state  high          # 当时 IO 仍偏高，档位在收
+io.max           8:0 rbps=16000000 wbps=16000000   # high 档 16M+16M
+Cline            被 OOM 后已重新起来；钉死 deepseek 未动
+```
+
+Cline Pass 钉死 / 缓存命中率不在本目录展开，见 [`../cline-pass-pin/`](../cline-pass-pin/)。本目录 **仍然不放** switcher 配置、JWT、SK。
+
+---
+
 ## 不要做
 
 ```
@@ -330,4 +405,8 @@ Key 占位，URL 保留本机值 `https://x-api.cfd/v1`。
 ✗  并行多开 Codex 挤 anyrouter
 ✗  把失败 thread_id 当成功去 resume
 ✗  把这台 3HK 的内网 IP / 磁盘用量当成你新机的事实
+✗  往 /sys/fs/cgroup/io.max 写带宽（io 已委派，写不进去）
+✗  MemorySwapMax=0  同时又把 MemoryMax 收紧
+✗  给 user.slice 和 user-0.slice 各写一份 io.max（会叠乘）
+✗  看门狗每 30s drop_caches
 ```
