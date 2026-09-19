@@ -1,0 +1,69 @@
+# ============================================================
+# Grok CLI · runanytime.hxi.me + thinking-proxy
+#
+# 只在「Grok CLI 直连 runanytime 的 grok-4.6 会报 signature 错」时用这份。
+# 先启动本目录 thinking-proxy.py，再让 CLI 打 127.0.0.1:8899。
+#
+# ~/.bashrc:
+#   export GROK_RELAY_API_KEY="你的runanytime密钥"
+#   export GROK_MODELS_BASE_URL="http://127.0.0.1:8899/v1"
+# ============================================================
+
+[cli]
+installer = "npm"
+auto_update = false
+
+[marketplace]
+official_marketplace_auto_installed = true
+
+[[marketplace.sources]]
+name = "xAI Official"
+git = "https://github.com/xai-org/plugin-marketplace.git"
+
+[ui]
+max_thoughts_width = 120
+fork_secondary_model = "grok-build"
+yolo = false
+compact_mode = false
+permission_mode = "always-approve"
+
+[models]
+default = "grok-4.6"
+default_reasoning_effort = "high"
+
+# 模型目录也走代理，避免 CLI 再直连上游 /v1/models
+[endpoints]
+models_base_url = "http://127.0.0.1:8899/v1"
+
+# ============================================================
+# Grok 4.6（必须走 Anthropic messages + 本机代理）
+# ============================================================
+
+[model."grok-4.6"]
+model = "grok-4.6"
+name = "Grok 4.6"
+description = "Grok 4.6 via runanytime.hxi.me through thinking-proxy"
+
+base_url = "http://127.0.0.1:8899/v1"
+api_backend = "messages"
+env_key = "GROK_RELAY_API_KEY"
+context_window = 500000
+max_completion_tokens = 65536
+supports_reasoning_effort = false
+supports_backend_search = false
+extra_headers = { "anthropic-version" = "2023-06-01" }
+
+# grok-4.5 在 runanytime 上经常没有可用渠道。
+# 若状态页恢复，同样走 messages + 代理，不要改回 chat_completions。
+#
+# [model."grok-4.5"]
+# model = "grok-4.5"
+# name = "Grok 4.5"
+# base_url = "http://127.0.0.1:8899/v1"
+# api_backend = "messages"
+# env_key = "GROK_RELAY_API_KEY"
+# context_window = 500000
+# max_completion_tokens = 65536
+# supports_reasoning_effort = false
+# supports_backend_search = false
+# extra_headers = { "anthropic-version" = "2023-06-01" }
