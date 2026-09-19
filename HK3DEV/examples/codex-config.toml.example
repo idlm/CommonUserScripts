@@ -1,0 +1,38 @@
+# ~/.codex/config.toml  ·  3HK 快照（脱敏）
+# Key 不写在这里。Codex 读 ~/.codex/auth.json（chmod 600）或环境变量
+# temp_env_key 指出的名字：ANY_API_KEY / CPA_API_KEY
+
+model_provider = "any"
+model = "gpt-6-astra"
+model_reasoning_effort = "high"
+
+[model_providers]
+
+[model_providers.cpa]
+name = "CPA"
+base_url = "http://85.8.151.190:8317/v1"
+wire_api = "responses"
+temp_env_key = "CPA_API_KEY"
+requires_openai_auth = true
+model = "gpt-5.6-sol"
+
+[model_providers.any]
+name = "ANY"
+base_url = "https://anyrouter.top/v1"
+wire_api = "responses"
+temp_env_key = "ANY_API_KEY"
+requires_openai_auth = true
+model = "gpt-5.2"
+
+# 按新机路径改。3HK 实际信任这些目录：
+[projects."/home/dev/codex"]
+trust_level = "trusted"
+
+[projects."/home/dev/cline"]
+trust_level = "trusted"
+
+[projects."/home/dev/cline/pd-monitor"]
+trust_level = "trusted"
+
+[projects."/home/dev/cline/pd-monitor-v2"]
+trust_level = "trusted"

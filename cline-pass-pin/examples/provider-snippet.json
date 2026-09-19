@@ -1,0 +1,30 @@
+{
+  "_comment": "agent / OpenAI 兼容客户端的 provider 块。走 switcher 时 Base URL 指本机代理；不装 switcher 时直连官方并自己塞钉住字段。",
+  "clinepass_via_switcher": {
+    "baseUrl": "http://127.0.0.1:3123/v1",
+    "api": "openai-completions",
+    "authHeader": true,
+    "apiKey": "{{🐶}}",
+    "headers": {
+      "HTTP-Referer": "https://pi.dev",
+      "X-Title": "pi"
+    }
+  },
+  "clinepass_direct_pin_vercel": {
+    "baseUrl": "https://api.cline.bot/api/v1",
+    "api": "openai-completions",
+    "authHeader": true,
+    "apiKey": "{{🐶}}",
+    "headers": {
+      "HTTP-Referer": "https://pi.dev",
+      "X-Title": "pi"
+    },
+    "requestBodyExtras": {
+      "providerOptions": {
+        "gateway": {
+          "only": ["deepseek"]
+        }
+      }
+    }
+  }
+}

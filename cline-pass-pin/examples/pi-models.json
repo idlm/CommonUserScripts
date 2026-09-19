@@ -1,0 +1,109 @@
+{
+  "clinepass": {
+    "baseUrl": "https://api.cline.bot/api/v1",
+    "api": "openai-completions",
+    "authHeader": true,
+    "apiKey": "{{🐶}}",
+    "headers": {
+      "HTTP-Referer": "https://pi.dev",
+      "X-Title": "pi"
+    },
+    "compat": {
+      "supportsStore": false,
+      "supportsDeveloperRole": false,
+      "supportsReasoningEffort": true,
+      "supportsStrictMode": false,
+      "maxTokensField": "max_tokens"
+    },
+    "models": [
+      {
+        "id": "cline-pass/qwen3.8-max",
+        "name": "Qwen3.8 Max (ClinePass)",
+        "reasoning": true,
+        "thinkingLevelMap": {
+          "off": null,
+          "minimal": null,
+          "low": "low",
+          "medium": "medium",
+          "high": null,
+          "xhigh": "xhigh"
+        },
+        "input": ["text"],
+        "contextWindow": 1000000,
+        "maxTokens": 131072,
+        "cost": {
+          "input": 2,
+          "output": 6,
+          "cacheRead": 0.25,
+          "cacheWrite": 2.5
+        }
+      },
+      {
+        "id": "cline-pass/glm-5.3",
+        "name": "GLM-5.3 (ClinePass)",
+        "reasoning": true,
+        "thinkingLevelMap": {
+          "off": null,
+          "minimal": null,
+          "low": "low",
+          "medium": null,
+          "high": "high",
+          "xhigh": "max"
+        },
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "cost": {
+          "input": 1.4,
+          "output": 4.4,
+          "cacheRead": 0.26,
+          "cacheWrite": 0
+        }
+      },
+      {
+        "id": "cline-pass/kimi-k3",
+        "name": "Kimi K3 (ClinePass)",
+        "reasoning": true,
+        "thinkingLevelMap": {
+          "off": null,
+          "minimal": null,
+          "low": null,
+          "medium": null,
+          "high": "max",
+          "xhigh": null
+        },
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "cost": {
+          "input": 3,
+          "output": 15,
+          "cacheRead": 0.3,
+          "cacheWrite": 0
+        }
+      },
+      {
+        "id": "cline-pass/deepseek-v4.1-flash",
+        "name": "DeepSeek V4.1 Flash (ClinePass)",
+        "reasoning": true,
+        "thinkingLevelMap": {
+          "off": "none",
+          "minimal": null,
+          "low": null,
+          "medium": null,
+          "high": "high",
+          "xhigh": "high"
+        },
+        "input": ["text"],
+        "contextWindow": 1000000,
+        "maxTokens": 384000,
+        "cost": {
+          "input": 0.44,
+          "output": 1.32,
+          "cacheRead": 0.014,
+          "cacheWrite": 0
+        }
+      }
+    ]
+  }
+}
