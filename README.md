@@ -14,6 +14,25 @@ curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/grok-cl
 wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/grok-cli-runanytime/install.sh | bash
 ```
 
+**开发环境一键安装**（新机：基础软件 / Android 编译链 / AI CLI / CLIProxyAPI）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/dev-env-setup/setupv11.sh | bash
+```
+
+```bash
+wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/dev-env-setup/setupv11.sh | bash
+```
+
+非交互装新机推荐方案：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/dev-env-setup/setupv11.sh \
+  | bash -s -- --yes --profile new
+```
+
+旧版分级菜单：`.../dev-env-setup/setupV10.sh`。脚本清单：`.../dev-env-setup/setup.sh`。
+
 **Codex 开会话（anyrouter 高峰：先探 `/v1/responses`，再单发 `codex exec --json init`）**：
 
 ```bash
@@ -39,3 +58,4 @@ curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/codex-i
 |:--|:--|
 | [`grok-cli-runanytime/`](grok-cli-runanytime/) | 把 [Grok CLI](https://x.ai/cli) 接到 `runanytime.hxi.me` 的 **grok-4.6**（本机 thinking-proxy + 一键写配置）。之后只需 `nano ~/.bashrc` 改 Key。 |
 | [`codex-init-session/`](codex-init-session/) | 针对 **anyrouter.top** 开 Codex 会话。默认 HTTP 探针 + 单发 `codex exec --json`；认中英过载（`负载已经达到上限` / `high demand`）；有 `thread_id` 但 `turn.failed` 不算成功。旧 TUI 路径用 `--tui`。 |
+| [`dev-env-setup/`](dev-env-setup/) | 新机开发环境：v1.1 预检+方案+勾选（推荐）/ v1.0 分级菜单。含 Android SDK 34、AI CLI、**cpa**=CLIProxyAPI。改写自 [Gabxb/FrequentlyUsedScripts](https://github.com/Gabxb/FrequentlyUsedScripts)；raw 无 `/scripts/` 前缀。 |
