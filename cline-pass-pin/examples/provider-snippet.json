@@ -1,10 +1,10 @@
 {
-  "_comment": "agent / OpenAI 兼容客户端的 provider 块。走 switcher 时 Base URL 指本机代理；不装 switcher 时直连官方并自己塞钉住字段。",
+  "_comment": "agent / OpenAI 兼容客户端的 provider 块。走 switcher 时 Base URL 指本机代理；不装 switcher 时直连官方并自己塞钉住字段。测试 Key 按要求写入，推仓前删。",
   "clinepass_via_switcher": {
     "baseUrl": "http://127.0.0.1:3123/v1",
     "api": "openai-completions",
     "authHeader": true,
-    "apiKey": "{{🐶}}",
+    "apiKey": "sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec",
     "headers": {
       "HTTP-Referer": "https://pi.dev",
       "X-Title": "pi"
@@ -14,7 +14,7 @@
     "baseUrl": "https://api.cline.bot/api/v1",
     "api": "openai-completions",
     "authHeader": true,
-    "apiKey": "{{🐶}}",
+    "apiKey": "sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec",
     "headers": {
       "HTTP-Referer": "https://pi.dev",
       "X-Title": "pi"

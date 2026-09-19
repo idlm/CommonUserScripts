@@ -3,7 +3,7 @@
     "baseUrl": "https://api.cline.bot/api/v1",
     "api": "openai-completions",
     "authHeader": true,
-    "apiKey": "{{🐶}}",
+    "apiKey": "sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec",
     "headers": {
       "HTTP-Referer": "https://pi.dev",
       "X-Title": "pi"
@@ -102,6 +102,13 @@
           "output": 1.32,
           "cacheRead": 0.014,
           "cacheWrite": 0
+        },
+        "requestBodyExtras": {
+          "providerOptions": {
+            "gateway": {
+              "only": ["deepseek"]
+            }
+          }
         }
       }
     ]

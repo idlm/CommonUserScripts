@@ -1,0 +1,32 @@
+# CPA (CLIProxyAPI) 把 Cline Pass 当成一条 OpenAI 兼容上游。
+# 贴进 CPA 的 config.yaml（默认监听 :8317）。
+# 测试 Key 按要求写入；推 public 仓前改回 sk-***。
+#
+# C1 直连官方：下游必须自己在 OpenAI chat body 里带
+#   providerOptions.gateway.only: ["deepseek"]
+# CPA 配置没有 extra_body 旋钮，不会替你钉。
+#
+# C2 走本机 switcher（推荐不会改 body 的客户端）：
+#   把 base-url 改成 http://127.0.0.1:3123/v1
+#   api-key 填 switcher 的 proxyKey；本地空鉴权可随便填
+#   sk_ 只放在 switcher 的 accounts[].key
+#
+# 文档：https://github.com/router-for-me/CLIProxyAPI
+# 字段名以上游 config.example.yaml 为准。
+
+openai-compatibility:
+  - name: "cline-pass"
+    # C1 官方：
+    base-url: "https://api.cline.bot/api/v1"
+    # C2 switcher（二选一，不要两个一起开同名）：
+    # base-url: "http://127.0.0.1:3123/v1"
+    api-key-entries:
+      - api-key: "sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec"
+        # C2 时改成 switcher proxyKey，例如：
+        # api-key: "local"
+    models:
+      - name: "cline-pass/deepseek-v4.1-flash"
+        alias: "ds-flash"
+        # 可选：同族短名，避免客户端切过去又随机
+      - name: "cline-pass/deepseek-v4-flash"
+        alias: "ds-flash-short"

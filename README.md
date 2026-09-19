@@ -195,8 +195,37 @@ cline-pass/deepseek-v4.1-flash
 
 现在只能钉 **Vercel 的 deepseek 官转**。OpenRouter 顶层 `provider.only` 会被丢弃。
 官方 `GET /v1/models` **不含** `cline-pass/`，模型 id 手写或自己 curl 探测。
+实测：带 extras → `finalProvider=deepseek`；不带 → 随机（曾落到 fireworks）。
 
-不装代理也能钉：在 provider 里自己加那个 JSON 字段。switcher 只是代劳。
+四条路（细节在模块 README）：
+
+```
+A  switcher 127.0.0.1:3123/v1     不会改 body 的客户端 / Cline CLI
+B  agent extras 直连 api.cline.bot  pi / SDK extra_body
+C  CPA :8317 当客户端               透传 extras，或再指 switcher
+D  curl 自检                        max_tokens >= 256，看 provider_metadata
+```
+
+CPA **不会**自己注入钉住字段。`openai-compatibility.base-url` 指官方或本机 switcher，
+`sk_` 是 Cline 的，不要和 CPA `api-keys` 搞混。片段：`cline-pass-pin/examples/cpa-cline-pass.yaml`
+
+**Codex / Claude Code 最简**（两边都没有 requestBodyExtras，Claude 还是 Anthropic 协议）：
+
+```
+1. 装 switcher（--daemon），sk_ 只给 CLINE_PASS_KEY
+2. Codex：~/.codex/config.toml 新加 provider
+     base_url = "http://127.0.0.1:3123/v1"
+     wire_api = "chat"          # 不要抄现有的 responses
+     启动：codex -c model_provider="clinepass" -c model="cline-pass/deepseek-v4.1-flash"
+3. Claude：先装 CPA，openai-compatibility.base-url 指 :3123/v1
+     ~/.claude/settings.json 只改 env：
+     ANTHROPIC_BASE_URL=http://127.0.0.1:8317
+     ANTHROPIC_API_KEY=<CPA api-keys，不是 sk_>
+     ANTHROPIC_MODEL=ds-flash
+```
+
+不要改现网的 anyrouter / runanytime；这是另开一条。远端 HK3DEV `:8317` 不是 Cline Pass。
+测试 Key 和逐文件改法：[`cline-pass-pin/`](cline-pass-pin/) →「最简方案」「客户端怎么指」。推仓前把 Key 从模块 README 删掉。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh | bash
@@ -212,7 +241,7 @@ curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-p
 ```
 
 客户端：`Base URL http://127.0.0.1:3123/v1`，模型 `cline-pass/deepseek-v4.1-flash`。
-pi JSON / 自钉片段：[`cline-pass-pin/examples/`](cline-pass-pin/examples/)
+完整方法 / pi JSON / CPA：[`cline-pass-pin/`](cline-pass-pin/)
 
 ---
 
@@ -243,4 +272,7 @@ wget -qO-  <raw-url> | bash -s -- --list
 ✗  把 cline-pass Key（sk_）推进 git
 ✗  用顶层 provider.only 钉 ds-v4.1-flash（会被 Cline 丢弃）
 ✗  相信官方 /v1/models 会列出 cline-pass/*
+✗  以为 CPA 配了 Cline Pass 的 base-url 就会自动钉上游
+✗  把 Claude ANTHROPIC_BASE_URL 直接指 127.0.0.1:3123
+✗  用 Codex wire_api=responses 打 Cline Pass
 ```

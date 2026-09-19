@@ -1,0 +1,13 @@
+# 贴进 ~/.codex/config.toml（另加一块，不要改现有的 any / cpa）。
+# Codex 没有 requestBodyExtras，钉住靠本机 switcher。
+# 启动：codex -c model_provider="clinepass" -c model="cline-pass/deepseek-v4.1-flash"
+#
+# sk_ 只给 switcher（CLINE_PASS_KEY），不要写在这里。
+# temp_env_key 指向的环境变量填 switcher proxyKey；本地空鉴权任意非空字符串即可。
+
+[model_providers.clinepass]
+name = "ClinePass"
+base_url = "http://127.0.0.1:3123/v1"
+wire_api = "chat"
+temp_env_key = "CLINE_PASS_PROXY_KEY"
+requires_openai_auth = true
