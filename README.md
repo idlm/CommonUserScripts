@@ -14,14 +14,23 @@ curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/grok-cl
 wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/grok-cli-runanytime/install.sh | bash
 ```
 
-**Codex 高峰排队重开**（当前目录；报错来自 anyrouter 经 Codex TUI，不是官方网页）：
+**Codex 开会话（anyrouter 高峰：先探 `/v1/responses`，再单发 `codex exec --json init`）**：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/codex-init-session/init-session.sh | bash -s -- -C "$(pwd)"
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/codex-init-session/init-session.sh \
+  | bash -s -- -C "$(pwd)" --no-task
 ```
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/codex-init-session/init-session.sh | bash -s -- -C "$(pwd)"
+wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/codex-init-session/init-session.sh \
+  | bash -s -- -C "$(pwd)" --no-task
+```
+
+只探通道、不启动 Codex：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/codex-init-session/init-session.sh \
+  | bash -s -- -C "$(pwd)" --probe-only
 ```
 
 管道带参数时用 `bash -s --`，`--` 后面才是脚本自己的选项。
@@ -29,4 +38,4 @@ wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/codex-in
 | 目录 | 做什么 |
 |:--|:--|
 | [`grok-cli-runanytime/`](grok-cli-runanytime/) | 把 [Grok CLI](https://x.ai/cli) 接到 `runanytime.hxi.me` 的 **grok-4.6**（本机 thinking-proxy + 一键写配置）。之后只需 `nano ~/.bashrc` 改 Key。 |
-| [`codex-init-session/`](codex-init-session/) | Codex 交互式开会话。匹配的是 **anyrouter.top 经 Codex TUI** 打出的 `high demand` / `Reconnecting...`，不是官方 ChatGPT 网页。命中就关会话、等 5 分钟再开。 |
+| [`codex-init-session/`](codex-init-session/) | 针对 **anyrouter.top** 开 Codex 会话。默认 HTTP 探针 + 单发 `codex exec --json`；认中英过载（`负载已经达到上限` / `high demand`）；有 `thread_id` 但 `turn.failed` 不算成功。旧 TUI 路径用 `--tui`。 |
