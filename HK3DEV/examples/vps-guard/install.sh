@@ -31,7 +31,11 @@ systemctl daemon-reload
 echo '+cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control || true
 echo '+cpu +io +memory +pids' > /sys/fs/cgroup/user.slice/cgroup.subtree_control 2>/dev/null || true
 echo '+cpu +io +memory +pids' > /sys/fs/cgroup/system.slice/cgroup.subtree_control 2>/dev/null || true
+install -m 0755 "$HERE/protect-agents.sh" /usr/local/sbin/protect-agents.sh
+install -m 0755 "$HERE/run-in-packing-slice.sh" /usr/local/sbin/run-in-packing-slice.sh
+
 systemctl enable --now vps-guard.timer
 /usr/local/sbin/vps-guard.sh || true
+/usr/local/sbin/protect-agents.sh || true
 echo "installed. timer=$(systemctl is-active vps-guard.timer) state=$(cat /var/lib/vps-guard/state 2>/dev/null || echo none)"
 echo "user.slice io.max=$(cat /sys/fs/cgroup/user.slice/io.max 2>/dev/null || echo missing)"

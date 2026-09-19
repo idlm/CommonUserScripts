@@ -30,7 +30,32 @@ system.slice IORead/WriteBandwidthMax = 24M
 
 切换有滞回 + 连续 2 次确认（timer 30s ≈ 60s）才 `set-property`。`drop_caches` **只在 emergency**，且间隔 ≥ 900s。
 
+**内存下限不再随档位收到构建需求以下。** 这是 Cline 会话 `1789847324501_r6o6f` 第二轮的结论：第一次修完滞回后，emergency 仍把 user `MemoryMax` 收到 2600M，`7za` 1.19G 一顶就 `CONSTRAINT_MEMCG`，cline 被连坐。
+
 用户原话要整机 30–40 MiB/s：high 档 32M 落在区间内；ok 档略宽，避免正常会话被拖死。
+
+## Cline 方案（已并入）
+
+会话问的是「`ups-guard.sh` 为什么一直跑 / drop_caches 为什么卡 / 为什么 cline 退出」。Cline 查到真名 `vps-guard.sh`，选 **C+A**（修守卫 + 降峰打包），两轮：
+
+1. **去抖**：滞回、2 tick 确认、drop 冷却 900s、抬内存。当时写操作一度被 Plan 模式拦住，切 act 后落地。
+2. **隔离 + 保险**（OOM 之后）：
+   - 内存下限改成 3600 / 3400 / **3200**（CPU/IO 仍随档位收）
+   - 重活进顶层 `packing.slice`，守卫只管 `user.slice`/`system.slice`
+   - agent `oom_score_adj=-800`
+   - 打包：`nice -n 19 ionice -c3`、`NODE_OPTIONS=--max-old-space-size=1536`；仍炸则 electron-builder `-c.compression=store`
+
+对应脚本：
+
+```bash
+sudo ./protect-agents.sh                          # 给已有 cline/claude/codex/grok 设 -800
+sudo ./run-in-packing-slice.sh -- npm run pack:linux
+# 仍 OOM 时：
+# sudo PACK_MEM_MAX=2800M ./run-in-packing-slice.sh -- \
+#   env NODE_OPTIONS=--max-old-space-size=1024 npm run pack:linux -- -c.compression=store
+```
+
+`oom_score_adj` 是进程属性，重启失效。Cline CLI 是 pts 交互进程、没有 unit，开机后要再跑 `protect-agents.sh`，或在对应 systemd service 里写 `OOMScoreAdjust=-800`。
 
 ## 装
 
@@ -39,6 +64,7 @@ system.slice IORead/WriteBandwidthMax = 24M
 #   VPS_GUARD_DISK=/dev/vda sudo ./install.sh
 sudo ./install.sh
 sudo ./setup-swap-4g.sh     # 4G 内存机强烈建议；没有 swap 时 MemoryMax 就是硬杀
+sudo ./protect-agents.sh    # 给当前 agent 进程 oom_score_adj=-800
 ```
 
 `setup-swap-4g.sh` 会：
@@ -59,6 +85,10 @@ cat /sys/fs/cgroup/system.slice/io.max
 cat /sys/fs/cgroup/user.slice/memory.swap.max
 journalctl -t vps-guard -n 30 --no-pager
 free -h
+# agent 是否已上保险
+awk '/cline|claude/{print}' /proc/*/oom_score_adj /dev/null 2>/dev/null | head
+cat /proc/$(pgrep -n -x cline)/oom_score_adj
+systemctl status packing.slice --no-pager
 ```
 
 ## 不要做
@@ -69,4 +99,6 @@ free -h
 ✗  每 30s drop_caches                       # 会把 page cache 打空，I/O 更炸
 ✗  user.slice 再叠加 user-0.slice 的 io.max
 ✗  把 MemoryMax 压到 2G 以下还在 user.slice 里跑 Cline + 7za
+✗  档位降级时把 MemoryMax 收到构建峰值以下
+✗  在 user.slice 里跟 Cline 同 memcg 跑 electron-builder / 7za
 ```

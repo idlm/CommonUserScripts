@@ -49,6 +49,8 @@ HK3DEV/
         ├── README.md
         ├── install.sh
         ├── setup-swap-4g.sh
+        ├── protect-agents.sh              oom_score_adj=-800（Cline 方案）
+        ├── run-in-packing-slice.sh        重活丢进 packing.slice
         ├── vps-guard.sh
         ├── vps-guard.service / .timer
         └── *.conf                         systemd drop-in 模板
@@ -346,6 +348,7 @@ Key 占位，URL 保留本机值 `https://x-api.cfd/v1`。
 3. **root cgroup 写 `io.max` 失败。** `io` 已通过 `cgroup.subtree_control` 委派，`/sys/fs/cgroup/io.max` 不存在或 `Permission denied`。所谓“全局”只能落在 `user.slice` + `system.slice`。
 4. **第一版看门狗过紧，把 Cline 自己杀掉。** 无 swap、`MemorySwapMax=0`、`user.slice` `MemoryMax` 一度压到 ~2.2G / 紧急档 1.4G，再叠加每 tick `drop_caches`。20:01:15 dmesg：`oom-kill` `CONSTRAINT_MEMCG` 约束 `/user.slice`，先杀 `7za`（anon ~1.1G），再杀 `cline`（当时 usage 2791MB vs limit 2662MB）。会话 `terminal_marker=failed_external_process_exit`。不是模型、不是 pin、不是 OAuth。
 5. **`user-0.slice` 再写一份 `io.max` 会叠乘。** 清掉子 slice 的独立限速，只留顶层。
+6. **Cline 自己诊断出的第二层缺陷（会话 `1789847324501_r6o6f`）。** 滞回修好了 drop_caches 风暴，但档位降级仍把 `MemoryMax` 一起缩小。electron-builder 的 `7za` 把 IO/load 顶进 emergency → 上限掉到 2600M → 构建和 agent 同 memcg 被连坐。Cline 当时在 Plan 模式，写操作被拦，方案在 OOM 前只落地了一半。
 
 ### 解决
 
@@ -356,13 +359,17 @@ Key 占位，URL 保留本机值 `https://x-api.cfd/v1`。
 | 看门狗 | `vps-guard.timer` 每 30s 读 PSI / load / MemAvailable% | 冲高再收紧，不杀进程、不动 AI 钉死 |
 | 滞回 | 进入/退出阈值分离 + 连续 2 tick 确认 | 消除 ok↔high↔emergency 抖动 |
 | drop_caches | 仅 emergency，且间隔 ≥ 900s | 第一次每 tick drop，page cache 被打空，I/O 更炸 |
-| 内存上限 | user `MemoryMax=3600M` / high 3400M / emergency 3200M | 给 Cline + 压缩任务留空间 |
+| 内存上限 | user `MemoryMax=3600M` / high 3400M / emergency 3200M | 给 Cline + 压缩任务留空间；**不再随档位收到构建需求以下**（Cline 方案） |
+| 隔离构建 | 重活进顶层 `packing.slice`，不进 `user.slice` | 再 OOM 只杀打包，不连坐 cline（Cline 方案） |
+| agent 保险 | `oom_score_adj=-800`（cline/claude/codex/grok） | 同 memcg 时内核优先杀构建侧（Cline 方案） |
 | swap | `/swapfile` 4G + fstab；`memory.swap.max=max` | 无 swap 时 MemoryMax 是硬杀；`MemorySwapMax=0` 等于没加 |
 
 落地文件（本机路径 → 本目录模板）：
 
 ```
 /usr/local/sbin/vps-guard.sh
+/usr/local/sbin/protect-agents.sh
+/usr/local/sbin/run-in-packing-slice.sh
 /etc/systemd/system/vps-guard.{service,timer}
 /etc/systemd/system.conf.d/io-accounting.conf
 /etc/systemd/system/user.slice.d/{io-controller,resource-guard}.conf
@@ -377,9 +384,24 @@ cd CommonUserScripts/HK3DEV/examples/vps-guard
 # 磁盘不是 sda：VPS_GUARD_DISK=/dev/vda sudo ./install.sh
 sudo ./install.sh
 sudo ./setup-swap-4g.sh
+sudo ./protect-agents.sh    # 给当前 cline/claude/codex/grok 设 oom_score_adj=-800
 ```
 
-细节、三档表、排错命令见 [`examples/vps-guard/README.md`](examples/vps-guard/README.md)。
+细节、三档表、Cline 会话里的 C+A 方案、排错命令见 [`examples/vps-guard/README.md`](examples/vps-guard/README.md)。
+
+### Cline 当时给出的方案（会话 `1789847324501_r6o6f`，已并入模板）
+
+用户问「`ups-guard.sh` 为什么一直在跑 / 为什么 drop_caches 会卡机 / 刚刚为什么 cline 退出」。Cline 查到真名是 `vps-guard.sh`，选 **C+A**：修守卫 + 降峰打包。方案分两轮，第二轮被 OOM 打断，本机后续补完。
+
+| 轮 | Cline 结论 | 落地 |
+|:--|:--|:--|
+| 1 诊断 | 不是常驻进程，是 30s oneshot；`high↔emergency` 无滞回，每次切进 emergency 就 `echo 1 > drop_caches`；emergency 把 user.slice 压到 1.4G / 8MB/s，electron-builder 必然被打死 | 滞回 + 2 tick 确认；drop 间隔 900s；内存/IO 上限抬高 |
+| 2 诊断 | `20:01:15 CONSTRAINT_MEMCG`：`7za` 1.19G + cline 511M 顶穿当时 emergency 的 2600M。**档位降级把内存上限一起缩小**是设计缺陷 | user MemoryMax 下限改成 ok 3600 / high 3400 / emergency **3200** |
+| 2 隔离 | 构建进程在 `user.slice/user-0.slice/session-3.scope`，和 cline 同 memcg | `systemd-run --slice=packing.slice`（顶层，守卫管不到） |
+| 2 保险 | 内核按 badness 选受害者，cline adj=0 | `oom_score_adj=-800` |
+| 2 降峰 | 同 slice 里 `nice -n 19 ionice -c3`、`NODE_OPTIONS=--max-old-space-size=1536`；仍 OOM 则 electron-builder `-c.compression=store` | 脚本 `run-in-packing-slice.sh`；store 压缩按需，不写进守卫 |
+
+本机现况与方案对齐：`protect-agents.sh` 已把 cline/claude 调到 `-800`；`packing.slice` 在（active）；守卫三档已是 3600/3400/3200。
 
 ### 验证（本机 2026-09-19 晚）
 
@@ -390,6 +412,8 @@ vps-guard.timer  active
 vps-guard state  high          # 当时 IO 仍偏高，档位在收
 io.max           8:0 rbps=16000000 wbps=16000000   # high 档 16M+16M
 Cline            被 OOM 后已重新起来；钉死 deepseek 未动
+oom_score_adj    cline/claude = -800
+packing.slice    loaded active
 ```
 
 Cline Pass 钉死 / 缓存命中率不在本目录展开，见 [`../cline-pass-pin/`](../cline-pass-pin/)。本目录 **仍然不放** switcher 配置、JWT、SK。
@@ -409,4 +433,6 @@ Cline Pass 钉死 / 缓存命中率不在本目录展开，见 [`../cline-pass-p
 ✗  MemorySwapMax=0  同时又把 MemoryMax 收紧
 ✗  给 user.slice 和 user-0.slice 各写一份 io.max（会叠乘）
 ✗  看门狗每 30s drop_caches
+✗  档位降级时把 MemoryMax 收到构建峰值以下（Cline 第二轮踩过：2600M 杀掉 7za+cline）
+✗  在 user.slice 里跟 Cline 同 memcg 跑 electron-builder / 7za
 ```
