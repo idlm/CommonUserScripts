@@ -12,6 +12,32 @@ nano ~/.bashrc    # 只改 GROK_RELAY_API_KEY
 
 ---
 
+## 一条命令（curl / wget）
+
+不 clone 仓库，直接装到本机 `~/.grok` 和 `~/.bashrc`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/grok-cli-runanytime/install.sh | bash
+```
+
+```bash
+wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/grok-cli-runanytime/install.sh | bash
+```
+
+管道里要带参数，必须用 `bash -s --`（不要漏 `--`）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/grok-cli-runanytime/install.sh | bash -s -- --start
+```
+
+```bash
+wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/grok-cli-runanytime/install.sh | bash -s -- --help
+```
+
+`install.sh` 会从 GitHub raw 再拉 `setup-runanytime.sh`、`thinking-proxy.py` 和配置模板，然后调用 setup。装完仍然只改 `~/.bashrc` 里的 Key，再 `source ~/.bashrc`，另开终端跑 `~/.grok/start-thinking-proxy.sh`。
+
+---
+
 ## 这解决什么问题
 
 runanytime 是 New API 网关。grok-4.6 在状态页上通常是活的，但 **Grok CLI 不能当普通 OpenAI Base URL 直连**：
@@ -53,7 +79,7 @@ grok --version
 
 ---
 
-## 一键开始
+## 想先 clone 再跑
 
 ```bash
 git clone https://github.com/idlm/CommonUserScripts.git
@@ -193,6 +219,7 @@ claude --model grok-4.6
 
 | 文件 | 用途 |
 |:--|:--|
+| `install.sh` | **curl / wget 入口**：拉齐文件后调用 `setup-runanytime.sh` |
 | `setup-runanytime.sh` | 一键写 `~/.grok` + `~/.bashrc` 标记块 |
 | `thinking-proxy.py` | 本机代理：丢掉缺 signature 的 thinking 块 |
 | `thinking-proxy.test.py` | 过滤逻辑离线断言 |
