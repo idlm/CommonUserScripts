@@ -9,7 +9,9 @@
 #   curl -fsSL .../install.sh | bash -s -- --help
 #
 # 环境变量：
-#   CLINE_PASS_KEY              上游 Cline Pass Key（sk_…）。也可事后在控制台填
+#   CLINE_PASS_USE_OAUTH        1（默认）用本机 Cline 登录态打上游并自动续期。
+#                               设为 0 才回退到静态 sk_（容易过期并报 Unauthorized）。
+#   CLINE_PASS_KEY              仅 CLINE_PASS_USE_OAUTH=0 时使用的静态 sk_
 #   PROXY_KEY                   下游代理密钥；本地默认可空
 #   CLINE_PASS_PIN_HOME         安装目录，默认 ~/.cline-pass-switcher
 #   CLINE_PASS_PIN_PORT         监听端口，默认 3123
@@ -36,6 +38,12 @@ UNIT_NAME="cline-pass-switcher.service"
 SYSTEM_UNIT="/etc/systemd/system/${UNIT_NAME}"
 USER_UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/${UNIT_NAME}"
 CLINE_PROVIDERS="${CLINE_PROVIDERS:-$HOME/.cline/data/settings/providers.json}"
+# 默认走本机已登录的 Cline Pass，不依赖会过期的静态 sk_。
+USE_OAUTH="${CLINE_PASS_USE_OAUTH:-1}"
+case "${USE_OAUTH}" in
+  0|false|no|off) USE_OAUTH=0 ;;
+  *) USE_OAUTH=1 ;;
+esac
 
 info()  { printf '\033[36m==>\033[0m %s\n' "$*"; }
 warn()  { printf '\033[33m!! \033[0m %s\n' "$*" >&2; }
@@ -48,6 +56,7 @@ usage() {
   --install-service    配完后装 systemd，enable --now（开机自启，推荐）
   --uninstall-service  关掉开机自启并删 unit（不停改 config）
   --pin-cline          把已登录的 Cline CLI 指到本机 :3123（只改 baseUrl / 模型）
+  --static-key         不用登录态，改回静态 sk_（需要 CLINE_PASS_KEY，容易过期）
   --start              配完后在前台启动（管道场景用 --daemon / --install-service）
   --daemon             配完后 nohup 后台启动（reboot 会丢，能装 systemd 请用 --install-service）
   --stop               停 nohup；若 systemd 在跑则 systemctl stop（不 disable）
@@ -58,7 +67,11 @@ usage() {
   --no-clone           已有 src/ 时不 git pull
   --help / -h          本帮助
 
-环境变量见脚本头注释。Key 不要写进 git / systemd unit。
+默认 CLINE_PASS_USE_OAUTH=1：上游用 ~/.cline 的登录态，过期前自动续期。
+不要再填 sk_。静态 key 被网关拒绝时会返回：
+  Unauthorized: Please make sure you're using the latest version of Cline
+  and re-authenticate your Cline account.
+Key 不要写进 git / systemd unit。
 EOF
 }
 
@@ -212,6 +225,7 @@ print("pinMode   ", pm.get("pinMode"))
 print("upstreams ", pm.get("upstreams"))
 nacc = len(cfg.get("accounts") or [])
 print("accounts  ", nacc, "(keys hidden)")
+print("oauth     ", "on" if cfg.get("useClineOAuth") else "off")
 print("proxyKey  ", "set" if cfg.get("proxyKey") else "empty")
 PY
   fi
@@ -239,10 +253,11 @@ probe_cmd() {
 }
 
 build_config_json() {
-  python3 - "$1" "$PORT" "$BIND" "$UPSTREAM" "$MODEL" "${CLINE_PASS_KEY:-}" "${PROXY_KEY:-}" <<'PY'
+  python3 - "$1" "$PORT" "$BIND" "$UPSTREAM" "$MODEL" "${CLINE_PASS_KEY:-}" "${PROXY_KEY:-}" "$USE_OAUTH" <<'PY'
 import json, os, sys
-path, port, bind, upstream, model, key, proxy = sys.argv[1:8]
+path, port, bind, upstream, model, key, proxy, use_oauth = sys.argv[1:9]
 port = int(port)
+use_oauth = use_oauth == "1"
 existing = {}
 if os.path.isfile(path):
     try:
@@ -257,6 +272,7 @@ cfg = {
     "proxyKey": proxy or existing.get("proxyKey", ""),
     "publicBaseUrl": existing.get("publicBaseUrl", ""),
     "exposeCatalog": existing.get("exposeCatalog", False),
+    "useClineOAuth": use_oauth,
     "upstreamBase": existing.get("upstreamBase") or "https://api.cline.bot/api/v1",
     "accounts": existing.get("accounts") or [],
     "accountMode": existing.get("accountMode") or "single",
@@ -289,7 +305,7 @@ pin = {
 for m in (model, "cline-pass/deepseek-v4-flash"):
     cfg["perModel"][m] = pin
 
-if key:
+if key and not use_oauth:
     accs = cfg["accounts"] if isinstance(cfg["accounts"], list) else []
     if not accs:
         cfg["accounts"] = [{"name": "default", "key": key, "enabled": True}]
@@ -310,8 +326,7 @@ clone_switcher() {
   if [[ -d "$SRC_DIR/.git" ]]; then
     if [[ "${NO_CLONE:-0}" == 1 ]]; then
       info "跳过 git pull（--no-clone）"
-      return
-    fi
+    else
     info "更新 $SRC_DIR"
     git -C "$SRC_DIR" fetch --depth 1 origin 2>/dev/null || git -C "$SRC_DIR" fetch --depth 1
     if [[ "$SWITCHER_REF" == "HEAD" ]]; then
@@ -321,6 +336,7 @@ clone_switcher() {
       git -C "$SRC_DIR" reset --hard "${SWITCHER_REF}" >/dev/null 2>&1 \
         || git -C "$SRC_DIR" reset --hard "origin/main" >/dev/null 2>&1 \
         || git -C "$SRC_DIR" reset --hard "origin/master"
+    fi
     fi
   else
     info "clone $SWITCHER_REPO → $SRC_DIR"
@@ -332,6 +348,143 @@ clone_switcher() {
     fi
   fi
   [[ -f "$SRC_DIR/server.js" ]] || die "switcher 没有 server.js，clone 失败？"
+  ensure_oauth_support
+}
+
+# 上游仓库还没合并登录续期时，clone 下来的 server.js 仍用静态 sk_。
+# 缺 useClineOAuth 就补上同一段逻辑，否则下次拉代码又会 Unauthorized。
+ensure_oauth_support() {
+  python3 - "$SRC_DIR/server.js" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+if "useClineOAuth" in text and "async function clineBearer" in text:
+    print("oauth     server.js 已支持 useClineOAuth")
+    sys.exit(0)
+old = """const chatHeaders = (key) => ({
+  'Content-Type': 'application/json',
+  Authorization: `Bearer ${key}`,
+});"""
+new = r'''const CLINE_PROVIDERS_PATH = process.env.CLINE_PROVIDERS_PATH
+  || path.join(process.env.HOME || '/root', '.cline/data/settings/providers.json');
+const OAUTH_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+let oauthCache = null;
+let oauthRefreshPromise = null;
+
+function readClineAuth() {
+  const providers = loadJson(CLINE_PROVIDERS_PATH, null);
+  const map = providers?.providers || {};
+  return map.cline?.settings?.auth || map['cline-pass']?.settings?.auth || null;
+}
+
+function jwtExpiryMs(token) {
+  const raw = String(token || '').replace(/^workos:/i, '');
+  const part = raw.split('.')[1];
+  if (!part) return 0;
+  try {
+    const payload = JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function refreshClineOAuth(refreshToken) {
+  const res = await fetch(`${config.upstreamBase}/auth/refresh`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Cline/3.0.64',
+      'HTTP-Referer': 'https://cline.bot',
+      'X-Title': 'Cline',
+    },
+    body: JSON.stringify({ refreshToken, grantType: 'refresh_token' }),
+    signal: AbortSignal.timeout(30000),
+  });
+  const json = await res.json().catch(() => null);
+  const data = json?.data || json || {};
+  if (!res.ok || !data.accessToken) {
+    const msg = data?.message || json?.error?.message || `oauth refresh failed (${res.status})`;
+    throw new Error(msg);
+  }
+  const token = String(data.accessToken).replace(/^workos:/i, '');
+  return {
+    token,
+    refreshToken: data.refreshToken || refreshToken,
+    expiresAt: Date.parse(data.expiresAt) || jwtExpiryMs(token),
+  };
+}
+
+function persistClineAuth(next) {
+  try {
+    const providers = loadJson(CLINE_PROVIDERS_PATH, null);
+    if (!providers?.providers) return;
+    const now = new Date().toISOString();
+    for (const id of ['cline', 'cline-pass']) {
+      const auth = providers.providers[id]?.settings?.auth;
+      if (!auth) continue;
+      auth.accessToken = `workos:${next.token}`;
+      auth.refreshToken = next.refreshToken;
+      auth.expiresAt = next.expiresAt;
+      providers.providers[id].updatedAt = now;
+    }
+    fs.writeFileSync(CLINE_PROVIDERS_PATH, JSON.stringify(providers, null, 2) + '\n', { mode: 0o600 });
+  } catch (e) {
+    console.warn('[oauth] 写回登录态失败:', e.message);
+  }
+}
+
+async function clineBearer() {
+  if (oauthCache && oauthCache.expiresAt - Date.now() > OAUTH_REFRESH_BUFFER_MS) return oauthCache.token;
+  if (!oauthRefreshPromise) {
+    oauthRefreshPromise = (async () => {
+      const auth = readClineAuth();
+      const stored = String(auth?.accessToken || '').replace(/^workos:/i, '');
+      const expiresAt = Number(auth?.expiresAt) || jwtExpiryMs(stored);
+      if (stored && expiresAt - Date.now() > OAUTH_REFRESH_BUFFER_MS) {
+        oauthCache = { token: stored, expiresAt, refreshToken: auth.refreshToken };
+        return stored;
+      }
+      if (!auth?.refreshToken) throw new Error('Cline 登录态缺失，无法续期');
+      const next = await refreshClineOAuth(auth.refreshToken);
+      oauthCache = next;
+      persistClineAuth(next);
+      return next.token;
+    })().finally(() => { oauthRefreshPromise = null; });
+  }
+  return oauthRefreshPromise;
+}
+
+async function chatHeaders(key, { oauth = !!config.useClineOAuth } = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Cline/3.0.64',
+    'HTTP-Referer': 'https://cline.bot',
+    'X-Title': 'Cline',
+    'X-CLIENT-TYPE': 'cline-cli',
+    'X-CLIENT-VERSION': '3.0.64',
+    'X-PLATFORM': 'cli',
+    'X-PLATFORM-VERSION': '3.0.64',
+  };
+  if (oauth) {
+    headers.Authorization = `Bearer workos:${await clineBearer()}`;
+    return headers;
+  }
+  headers.Authorization = `Bearer ${key}`;
+  return headers;
+}'''
+if old not in text:
+    sys.exit("server.js 里没有预期的 chatHeaders，无法补登录续期。")
+text = text.replace(old, new, 1)
+text = text.replace("headers: chatHeaders(", "headers: await chatHeaders(")
+needle = "headers: await chatHeaders(k),"
+repl = "headers: await chatHeaders(k, { oauth: false }),"
+if needle not in text:
+    sys.exit("server.js 账号测试请求没对上，无法保持「测试密钥」测的是填入的 key。")
+text = text.replace(needle, repl, 1)
+path.write_text(text, encoding="utf-8")
+print("oauth     已给 server.js 补上 useClineOAuth（上游仓库尚未合并该修复）")
+PY
 }
 
 write_config() {
@@ -343,9 +496,10 @@ write_config() {
     if ! python3 - "$CONFIG_PATH" "$tmp" <<'PY'
 import json, sys
 a=json.load(open(sys.argv[1])); b=json.load(open(sys.argv[2]))
-# 比较钉住段
+# 比较钉住段和鉴权方式。useClineOAuth 变了也要写回，否则下次还用过期 sk_。
 sys.exit(0 if a.get("perModel")==b.get("perModel") and a.get("knownModels")==b.get("knownModels")
-           and a.get("port")==b.get("port") and a.get("bindHost")==b.get("bindHost") else 1)
+           and a.get("port")==b.get("port") and a.get("bindHost")==b.get("bindHost")
+           and bool(a.get("useClineOAuth"))==bool(b.get("useClineOAuth")) else 1)
 PY
     then
       warn "已有 $CONFIG_PATH。加 --yes 才会改 perModel / 端口（accounts 会保留）。"
@@ -358,6 +512,11 @@ PY
   chmod 600 "$CONFIG_PATH"
   info "写入 $CONFIG_PATH"
   info "钉住 $MODEL → $UPSTREAM (strict / Vercel gateway.only)"
+  if [[ "$USE_OAUTH" == 1 ]]; then
+    info "上游鉴权 = 本机 Cline 登录态（自动续期）。不要再填 sk_。"
+  else
+    warn "上游鉴权 = 静态 sk_。过期后会 Unauthorized，建议去掉 --static-key。"
+  fi
 }
 
 start_fg() {
@@ -556,6 +715,7 @@ DO_UNINSTALL_SERVICE=0
 DO_PIN_CLINE=0
 YES=0
 NO_CLONE=0
+DO_STATIC_KEY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -568,6 +728,7 @@ while [[ $# -gt 0 ]]; do
     --install-service) DO_INSTALL_SERVICE=1 ;;
     --uninstall-service) DO_UNINSTALL_SERVICE=1 ;;
     --pin-cline) DO_PIN_CLINE=1 ;;
+    --static-key) DO_STATIC_KEY=1 ;;
     --yes|-y) YES=1 ;;
     --no-clone) NO_CLONE=1 ;;
     --help|-h) usage; exit 0 ;;
@@ -575,6 +736,10 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+if [[ "$DO_STATIC_KEY" == 1 ]]; then
+  USE_OAUTH=0
+fi
 
 if [[ "$DO_UNINSTALL_SERVICE" == 1 ]]; then
   uninstall_service
@@ -632,7 +797,11 @@ else
   echo "  API Key   控制台「访问与安全」的 proxyKey；本地空 = 不鉴权"
   info "Cline CLI 已登录时："
   echo "  bash $0 --pin-cline"
-  info "Cline Pass 上游 Key 用环境变量 CLINE_PASS_KEY 或打开 http://${BIND}:${PORT}/ 在账号管理里填。"
+  if [[ "$USE_OAUTH" == 1 ]]; then
+    info "先 cline auth 登录 Cline Pass。代理会读 ~/.cline 并自动续期，不要填 sk_。"
+  else
+    info "静态 key 模式：用 CLINE_PASS_KEY 或打开 http://${BIND}:${PORT}/ 填写。过期会 Unauthorized。"
+  fi
   info "官方 /v1/models 不含 cline-pass/*，模型清单以本目录 examples/pi-models.json 为准。"
 fi
 

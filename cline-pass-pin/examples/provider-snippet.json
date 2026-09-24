@@ -4,7 +4,7 @@
     "baseUrl": "http://127.0.0.1:3123/v1",
     "api": "openai-completions",
     "authHeader": true,
-    "apiKey": "sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec",
+    "apiKey": "sk_你的ClinePassKey",
     "headers": {
       "HTTP-Referer": "https://pi.dev",
       "X-Title": "pi"
@@ -14,7 +14,7 @@
     "baseUrl": "https://api.cline.bot/api/v1",
     "api": "openai-completions",
     "authHeader": true,
-    "apiKey": "sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec",
+    "apiKey": "sk_你的ClinePassKey",
     "headers": {
       "HTTP-Referer": "https://pi.dev",
       "X-Title": "pi"

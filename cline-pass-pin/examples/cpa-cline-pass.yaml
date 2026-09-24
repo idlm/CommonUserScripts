@@ -21,7 +21,7 @@ openai-compatibility:
     # C2 switcher（二选一，不要两个一起开同名）：
     # base-url: "http://127.0.0.1:3123/v1"
     api-key-entries:
-      - api-key: "sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec"
+      - api-key: "sk_你的ClinePassKey"
         # C2 时改成 switcher proxyKey，例如：
         # api-key: "local"
     models:

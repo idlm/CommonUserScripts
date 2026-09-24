@@ -55,11 +55,11 @@ api.cline.bot  →  finalProvider = deepseek
 第二轮相同长前缀  →  cached_tokens 有数字（缓存命中）
 ```
 
-Cline CLI **没有** requestBodyExtras，不能自己钉。所以本机只改两处：switcher 注入字段，CLI 的 Base URL 指 `:3123`。OAuth JWT 仍打到本机，switcher 再用 `sk_` 打官方。
+Cline CLI **没有** requestBodyExtras，不能自己钉。所以本机只改两处：switcher 注入字段，CLI 的 Base URL 指 `:3123`。上游鉴权用本机已经登录的 Cline Pass，**不要再填 `sk_`**。静态 key 过期后网关会返回 `Unauthorized: Please make sure you're using the latest version of Cline and re-authenticate your Cline account.`
+
+先 `cline auth` 登录，再装：
 
 ```bash
-export CLINE_PASS_KEY='sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec'
-
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh \
   | bash -s -- --yes --install-service --pin-cline
 ```
@@ -72,7 +72,7 @@ wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pa
 本仓工作树：
 
 ```bash
-CLINE_PASS_KEY='sk_…' bash cline-pass-pin/install.sh --yes --install-service --pin-cline
+bash cline-pass-pin/install.sh --yes --install-service --pin-cline
 ```
 
 做了什么：
@@ -82,7 +82,8 @@ CLINE_PASS_KEY='sk_…' bash cline-pass-pin/install.sh --yes --install-service -
 | 1 | clone switcher → `~/.cline-pass-switcher/src` |
 | 2 | 写 `config.json`：`perModel[flash].upstreams=["deepseek"]` `pinMode=strict` |
 | 3 | 停掉旧 nohup，装 `/etc/systemd/system/cline-pass-switcher.service`，`enable --now` |
-| 4 | 已登录的 Cline CLI：只改 `providers.json` 的 `baseUrl` + `model`（OAuth 不动） |
+| 4 | 已登录的 Cline CLI：只改 `providers.json` 的 `baseUrl` + `model`（登录态不动） |
+| 5 | `config.json` 写 `useClineOAuth: true`。代理读 `~/.cline` 的登录态，过期前 5 分钟自动续期 |
 
 装完自检：
 
@@ -93,7 +94,7 @@ systemctl is-enabled cline-pass-switcher    # enabled
 ss -ltnp | grep 3123                        # 127.0.0.1:3123
 ```
 
-`sk_` 只活在 `~/.cline-pass-switcher/config.json`（chmod 600），**不写进 systemd unit**。
+登录态只活在 `~/.cline/data/settings/providers.json`（chmod 600）。代理配置里的 `useClineOAuth` 是开关，**不存放 token，也不写进 systemd unit**。
 
 停开机自启：`systemctl disable --now cline-pass-switcher`，或 `bash pin-ds.sh --uninstall-service`。
 
@@ -141,7 +142,7 @@ ss -ltnp | grep 3123                        # 127.0.0.1:3123
 ```json
 {
   "baseUrl": "https://api.cline.bot/api/v1",
-  "apiKey": "sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec",
+  "apiKey": "sk_你的ClinePassKey",
   "requestBodyExtras": {
     "providerOptions": {
       "gateway": { "only": ["deepseek"] }
@@ -171,7 +172,7 @@ extras **只给 flash**。glm / kimi / qwen 不要共用同一个带 `only: ["de
 一键（已登录时）：
 
 ```bash
-export CLINE_PASS_KEY='sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec'
+cline auth
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh \
   | bash -s -- --yes --install-service --pin-cline
 ```
@@ -365,15 +366,14 @@ Codex        ──►  switcher :3123/v1  （wire_api=chat，可跳过 CPA）
 
 ### 0. 先把 switcher 拉起来（两边共用）
 
-测试 Key 先 export，不要写进 git：
+先 `cline auth`。不要 export `sk_`：
 
 ```bash
-export CLINE_PASS_KEY='sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec'
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh \
   | bash -s -- --yes --install-service
 ```
 
-本机已 clone 时：`CLINE_PASS_KEY='…' bash cline-pass-pin/pin-ds.sh --yes --install-service`
+本机已 clone 时：`bash cline-pass-pin/pin-ds.sh --yes --install-service`
 
 没有 systemd 才用 `--daemon`（reboot 会丢）。
 
@@ -459,7 +459,7 @@ Model       cline-pass/deepseek-v4.1-flash
 ```json
 {
   "baseUrl": "https://api.cline.bot/api/v1",
-  "apiKey": "sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec",
+  "apiKey": "sk_你的ClinePassKey",
   "requestBodyExtras": {
     "providerOptions": {
       "gateway": { "only": ["deepseek"] }
@@ -510,7 +510,7 @@ API Key     控制台「访问与安全」的 proxyKey；本地空 = 不鉴权
 Model       cline-pass/deepseek-v4.1-flash
 ```
 
-3. 上游 `sk_` 用环境变量 `CLINE_PASS_KEY` 或打开 <http://127.0.0.1:3123/> 在「账号管理」粘贴。
+3. 上游默认用本机 Cline 登录态（`useClineOAuth: true`）。先 `cline auth`。不要再粘静态 `sk_`，过期就会 Unauthorized。
 4. Cline CLI 片段：[`examples/cline-cli-providers.snippet.json`](examples/cline-cli-providers.snippet.json)（只改 `baseUrl` / `model`，OAuth 不动）。
 
 switcher 按 `perModel[模型].upstreams = ["deepseek"]` + `pinMode: strict` 注入 planner 字段，
@@ -544,7 +544,7 @@ switcher 按 `perModel[模型].upstreams = ["deepseek"]` + `pinMode: strict` 注
   "baseUrl": "https://api.cline.bot/api/v1",
   "api": "openai-completions",
   "authHeader": true,
-  "apiKey": "sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec",
+  "apiKey": "sk_你的ClinePassKey",
   "requestBodyExtras": {
     "providerOptions": {
       "gateway": { "only": ["deepseek"] }
@@ -587,7 +587,7 @@ openai-compatibility:
   - name: "cline-pass"
     base-url: "https://api.cline.bot/api/v1"
     api-key-entries:
-      - api-key: "sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec"          # Cline 账户设置里的 sk_，不是 CPA 自己的 api-keys
+      - api-key: "sk_你的ClinePassKey"          # Cline 账户设置里的 sk_，不是 CPA 自己的 api-keys
     models:
       - name: "cline-pass/deepseek-v4.1-flash"
         alias: "ds-flash"          # 下游客户端看到的名字，可改
@@ -648,7 +648,7 @@ HK3DEV 里 CPA 默认 `:8317`，和这里是同一个软件；那边接的是 Co
 ### 方法 D · curl 直连自检
 
 ```bash
-export CLINE_PASS_KEY='sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec'
+export CLINE_PASS_KEY='sk_你的ClinePassKey'
 
 curl -fsS https://api.cline.bot/api/v1/chat/completions \
   -H "Authorization: Bearer ${CLINE_PASS_KEY}" \
@@ -674,8 +674,8 @@ planningReasoning 含 "Provider set restricted to: deepseek"
 
 ## 一条命令（curl / wget）
 
-不 clone 本仓。脚本会：检查 Node ≥ 18 → clone switcher → 写 `~/.cline-pass-switcher/config.json`（钉 `deepseek` / strict）。
-推荐直接 `--install-service`（systemd 开机自启）。Cline CLI 已登录再加 `--pin-cline`。
+不 clone 本仓。脚本会：检查 Node ≥ 18 → clone switcher → 写 `~/.cline-pass-switcher/config.json`（钉 `deepseek` / strict，`useClineOAuth: true`）。
+推荐直接 `--install-service`（systemd 开机自启）。Cline CLI 已登录再加 `--pin-cline`。不要设置 `CLINE_PASS_KEY`。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh | bash
@@ -703,21 +703,15 @@ curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-p
   | bash -s -- --print-config
 ```
 
-装完填 Key、启动：
+先登录再装。静态 `sk_` 会过期，默认不要填：
 
 ```bash
-# 推荐：环境变量 + systemd 开机自启 + 把已登录的 Cline CLI 指过来
-CLINE_PASS_KEY='sk_bd79c7474e086d632316e563ef1e52d08c69b0af3a5b33705ceebbe2406673ec' \
-  curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh \
+cline auth
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-pass-pin/install.sh \
   | bash -s -- --yes --install-service --pin-cline
 
 # 没有 systemd 才用 --daemon（reboot 会丢）
-# CLINE_PASS_KEY='sk_…' … | bash -s -- --yes --daemon
-
-# 先装后开控制台填 Key
-DATA_DIR="$HOME/.cline-pass-switcher" \
-  node "$HOME/.cline-pass-switcher/src/server.js"
-# 浏览器打开 http://127.0.0.1:3123/  → 账号管理 → 粘贴 Cline Pass Key
+# curl … | bash -s -- --yes --daemon
 ```
 
 本地已 clone 本仓时：
@@ -744,18 +738,16 @@ cline-pass/kimi-k3
 cline-pass/qwen3.8-max
 ```
 
-探测示例（把 Key 换成自己的，**不要把输出里的 Authorization 贴进 git**）：
+探测走本机代理，由代理带上已登录的 Cline 凭证。**不要把 Authorization 贴进 git**：
 
 ```bash
-# 官方目录：看不到 cline-pass/*
-curl -fsS https://api.cline.bot/api/v1/models \
-  -H "Authorization: Bearer ${CLINE_PASS_KEY}" | python3 -m json.tool | head
+# 本机目录：knownModels + perModel
+curl -fsS http://127.0.0.1:3123/v1/models | python3 -m json.tool | head
 
-# 试一个不在目录里的 id（404 / 模型不存在 = 真没有；200 = 能用）
-curl -fsS https://api.cline.bot/api/v1/chat/completions \
-  -H "Authorization: Bearer ${CLINE_PASS_KEY}" \
+# 试一个模型（200 且内容非空 = 登录态有效；401 / Unauthorized = 先 cline auth 再重开代理）
+curl -fsS http://127.0.0.1:3123/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"cline-pass/glm-5.3-flash","messages":[{"role":"user","content":"ping"}],"max_tokens":8}'
+  -d '{"model":"cline-pass/deepseek-v4.1-flash","messages":[{"role":"user","content":"Reply with the word OK"}],"max_tokens":800}'
 ```
 
 走本机代理时，`/v1/models` 返回的是 `knownModels` + `perModel` 的并集，不是官方目录。
@@ -776,7 +768,8 @@ curl -fsS https://api.cline.bot/api/v1/chat/completions \
 | `--status` | 端口 / nohup / systemd / 钉住段 / Cline baseUrl（不打印 Key） |
 | `--probe` | `GET http://127.0.0.1:3123/v1/models` |
 | `--print-config` | 打印将要写入的 JSON，不写盘 |
-| `--yes` / `-y` | 已有 config 时覆盖 `perModel` / 端口（**保留 accounts / proxyKey**） |
+| `--yes` / `-y` | 已有 config 时覆盖 `perModel` / 端口 / `useClineOAuth`（**保留 accounts / proxyKey**） |
+| `--static-key` | 关闭登录续期，改回静态 `sk_`。过期会再报 Unauthorized |
 | `--no-clone` | 已有 `src/` 时不 git pull |
 | `--help` | 帮助 |
 
@@ -786,7 +779,8 @@ curl -fsS https://api.cline.bot/api/v1/chat/completions \
 
 | 变量 | 默认 | 说明 |
 |:--|:--|:--|
-| `CLINE_PASS_KEY` | 空 | 上游 Cline Pass Key（`sk_`）。空则事后在控制台填 |
+| `CLINE_PASS_USE_OAUTH` | `1` | `1` 读本机 Cline 登录态并自动续期。`0` 才用静态 `sk_` |
+| `CLINE_PASS_KEY` | 空 | 仅 `CLINE_PASS_USE_OAUTH=0` 时的静态 key。默认留空 |
 | `PROXY_KEY` | 空 | 下游代理密钥；本地空 = 不鉴权 |
 | `CLINE_PASS_PIN_HOME` | `~/.cline-pass-switcher` | 数据目录（config / pid / log / src） |
 | `CLINE_PASS_PIN_PORT` | `3123` | 监听端口 |
@@ -855,7 +849,7 @@ cline-pass-pin/
 
 ## 其它设置
 
-1. **Cline Pass Key** 在 Cline 账户设置创建，前缀 `sk_`。下文测试 Key 已按要求写进 README；**推 public 仓前删掉**。
+1. **鉴权用本机 Cline 登录**，先 `cline auth`。不要把 `sk_` 写进 README、config 示例或 systemd。静态 key 过期就是这次的 Unauthorized。
 2. **pi**：见方法 B。走 switcher 时把 `baseUrl` 改成 `http://127.0.0.1:3123/v1`。
 3. **Cline VSCode / 其它不会改 body 的 OpenAI 客户端**：Base URL 指代理，模型 id 手写 `cline-pass/deepseek-v4.1-flash`。
 4. **Codex CLI**：[`examples/codex-clinepass.toml`](examples/codex-clinepass.toml) 追加进 `~/.codex/config.toml`。`wire_api = "chat"`。见最简方案。
@@ -881,6 +875,7 @@ if (pipeline === 'planner' || pipeline === null) {
 
 ```
 ✗  把 sk_ / Cookie / Authorization 写进 git 或 README 截图
+✗  用静态 sk_ 打 api.cline.bot。过期后就是 Unauthorized: re-authenticate。默认 useClineOAuth
 ✗  把顶层 provider.only 当成 ds-v4.1-flash 的钉住方式（会被丢弃）
 ✗  再去钉 OpenRouter（现在这条模型不让钉）
 ✗  把 BIND 改成 0.0.0.0 还把 proxyKey 留空
