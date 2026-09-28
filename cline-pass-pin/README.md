@@ -440,7 +440,7 @@ openai-compatibility:
 本机现在 Claude 走 `runanytime.hxi.me` / `grok-4.6`，Codex 走 `anyrouter` / `gpt-6-astra`。
 上面是**另开一条** Cline Pass 钉住通道，不是覆盖现网。切回去把 BASE_URL / `model_provider` 改回即可。
 
-HK3DEV 那条远端 `http://85.8.151.190:8317` 接的是 Codex 中转，**不是** Cline Pass。不要把 `sk_` 填进那边。
+Lab-VM 那条远端 `http://85.8.151.190:8317` 接的是 Codex 中转，**不是** Cline Pass。不要把 `sk_` 填进那边。
 
 ---
 
@@ -641,7 +641,7 @@ openai-compatibility:
 
 先方法 A 把 switcher 拉起来，再改 CPA 的 `base-url`。
 
-HK3DEV 里 CPA 默认 `:8317`，和这里是同一个软件；那边接的是 Codex 中转，**不是** Cline Pass。不要把两套 `base-url` 抄串。
+Lab-VM 上 CPA 默认 `:8317`，和这里是同一个软件；那边接的是 Codex 中转，**不是** Cline Pass。不要把两套 `base-url` 抄串。
 
 ---
 
@@ -881,7 +881,7 @@ if (pipeline === 'planner' || pipeline === null) {
 ✗  把 BIND 改成 0.0.0.0 还把 proxyKey 留空
 ✗  整仓复制 switcher 进本目录
 ✗  相信官方 GET /v1/models 会列出 cline-pass/*
-✗  把 HK3DEV 和本模块混在一起
+✗  把机器快照和本模块混在一起
 ✗  已有带 Key 的 config.json 不加 --yes 就指望钉住段被改掉
 ✗  用 max_tokens=16 的空内容误判「钉失败」
 ✗  以为 CPA 配了 base-url 就会自动钉上游（它不会注入 extras）
@@ -890,7 +890,7 @@ if (pipeline === 'planner' || pipeline === null) {
 ✗  把 Claude 的 ANTHROPIC_BASE_URL 直接指 :3123（协议是 Anthropic，Cline Pass 是 OpenAI）
 ✗  把 Codex 现有的 wire_api="responses" 抄去打 Cline Pass（要用 chat）
 ✗  把 Cline 的 sk_ 填进 Claude settings 或 Codex config.toml
-✗  改 HK3DEV 那条远端 :8317 当 Cline Pass（那边是 Codex 中转）
+✗  改 Lab-VM 那条远端 :8317 当 Cline Pass（那边是 Codex 中转）
 ✗  systemd 已经在跑还再 --daemon（会抢 3123）
 ✗  把 sk_ 写进 systemd unit / Environment=
 ```
@@ -906,4 +906,4 @@ if (pipeline === 'planner' || pipeline === null) {
 | [Cline Pass](https://cline.bot/cline-pass) | 订阅。官方 OpenAI 兼容端点 `https://api.cline.bot/api/v1`，模型 `cline-pass/*`。Key 在账户设置创建。 |
 | [Vercel AI Gateway — Provider Filtering](https://vercel.com/docs/ai-gateway/models-and-providers/provider-filtering-and-ordering) | `providerOptions.gateway.only / order / sort` 的语义。planner 管道走这里。 |
 | [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) | CPA。用 `openai-compatibility` 接任意 OpenAI 兼容上游。手册 [help.router-for.me](https://help.router-for.me/cn/)。 |
-| [idlm/CommonUserScripts](https://github.com/idlm/CommonUserScripts) | 本目录所在仓。`cline-pass-pin/` 是独立模块，不要和 `HK3DEV/` 混装。 |
+| [idlm/CommonUserScripts](https://github.com/idlm/CommonUserScripts) | 本目录所在仓。`cline-pass-pin/` 是独立模块，不要和机器快照混装。 |
