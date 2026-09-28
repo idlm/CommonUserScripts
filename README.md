@@ -34,7 +34,8 @@ CommonUserScripts/
 ├── grok-cli-runanytime/     Grok CLI  →  runanytime grok-4.6
 ├── codex-init-session/      Codex     →  anyrouter 高峰排队
 ├── dev-env-setup/           新机      →  基础 / APK / AI CLI / CPA
-└── cline-pass-pin/          Cline Pass → 钉死 Vercel deepseek 官转
+├── cline-pass-pin/          Cline Pass → 钉死 Vercel deepseek 官转
+└── Cline-to-CPA/            Cline Pass → 观测代理反带给远程 CPA
 ```
 
 | 模块 | 一句话 | 入口 |
@@ -43,6 +44,7 @@ CommonUserScripts/
 | [`codex-init-session`](codex-init-session/) | 先探 `/v1/responses`，再单发 `codex exec --json init` | `init-session.sh` |
 | [`dev-env-setup`](dev-env-setup/) | 新机预检 → 方案 → 勾选；Android SDK 34 + AI CLI + CPA | `setupv11.sh` |
 | [`cline-pass-pin`](cline-pass-pin/) | 钉 `ds-v4.1-flash` 到 Vercel `deepseek`，拉高缓存 | `install.sh` |
+| [`Cline-to-CPA`](Cline-to-CPA/) | 钉上游失效后，把观测代理反带出去给远程 CPA | `install.sh` |
 
 ---
 
@@ -224,6 +226,29 @@ curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/cline-p
 
 客户端：`Base URL http://127.0.0.1:3123/v1`，模型 `cline-pass/deepseek-v4.1-flash`。
 完整方法 / pi JSON / CPA：[`cline-pass-pin/`](cline-pass-pin/)
+
+---
+
+## 05  ·  CLINE  →  CPA
+
+钉上游已经锁不住。这一份把本机观测代理放到公网，远程 CPA 用一把 `cps-` 下游密钥来接。请求原样交给 Cline，只记录实际渠道。
+
+```
+远程 CPA  --Bearer cps-…-->  http://<公网IP>:3123/v1  -->  api.cline.bot
+本机 Cline CLI 继续打 127.0.0.1:3123/v1，不要求这把密钥
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/Cline-to-CPA/install.sh \
+  | bash -s -- --yes --install-service
+```
+
+```bash
+wget -qO- https://raw.githubusercontent.com/idlm/CommonUserScripts/main/Cline-to-CPA/install.sh \
+  | bash -s -- --yes --install-service
+```
+
+终端打印的 Base URL 和 API Key 交给远程 CPA 的 `openai-compatibility`。密钥不要写进 git。细节：[`Cline-to-CPA/`](Cline-to-CPA/)
 
 ---
 
