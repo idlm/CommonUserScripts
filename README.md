@@ -154,24 +154,7 @@ CPA 不代登。装完自己 `cpa --claude-login` / `--codex-login` / `--login`�
 
 ---
 
-## 04  ·  3HK
-
-`3HK` 的快照和 vps-guard 已经挪到私库，不留在这个公开仓库。
-
-[Server-Information-Backup / machines/10.69.134.135 · 3HK](https://github.com/idlm/Server-Information-Backup/tree/main/machines/10.69.134.135%20%C2%B7%203HK)
-
-旧版菜单 / 脚本清单：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/dev-env-setup/setupV10.sh | bash
-curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/dev-env-setup/setup.sh | bash
-curl -fsSL https://raw.githubusercontent.com/idlm/CommonUserScripts/main/dev-env-setup/setup.sh \
-  | bash -s -- --list
-```
-
----
-
-## 05  ·  CLINE PASS  /  PIN DEEPSEEK
+## 04  ·  CLINE PASS  /  PIN DEEPSEEK
 
 ```
 cline-pass/deepseek-v4.1-flash
