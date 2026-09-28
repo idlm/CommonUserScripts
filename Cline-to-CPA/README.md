@@ -106,6 +106,22 @@ curl -sS -m 10 -H "Authorization: Bearer <cps-密钥>" \
 
 密钥会换。换完改本机 `~/.cline-pass-switcher/config.json` 的 `proxyKey`，并改下面这一节。
 
+两套地址、两把钥匙，差在谁核验、用谁的 Cline 账号、能不能钉渠道。
+
+| | 官方直连 | 本机反代 |
+|:--|:--|:--|
+| 地址 | `https://api.cline.bot/api/v1` | `http://69.33.213.80:3123/v1` |
+| 密钥 | `sk_`，Cline 账户自己的 Pass Key | `cps-`，只用来进本机代理 |
+| 谁核验 | Cline 官方 | 本机 switcher。通过后，switcher 再用本机 `config.json` 里启用的那把 `sk_` 去打官方 |
+| 模型列表 | 官方目录，大约 400 多个 | 只列出本机的 6 个 `cline-pass/*` |
+| 钉上游 | 请求体里的 `only` 会被丢掉。账号自己可以记住渠道：响应里 `affinity.outcome=confirmed`、`pinnedProvider=deepseek` | 转发前删掉 `only` / `order` / `sort`。这条登录的 `affinity` 是 `no_pin`，渠道由网关当次决定 |
+| 渠道记录 | 没有 | 记在本机 `http://127.0.0.1:3123/` |
+| 本机 Cline CLI | 不走这里 | 继续打 `127.0.0.1:3123`，环回不要求 `cps-` |
+
+`sk_` 不能拿去调 `69.33.213.80:3123`，公网只认 `cps-`。`cps-` 也不能拿去调 `api.cline.bot`。反代上游用的是本机启用的 `sk_`，和下面写的官方 `sk_` 是同一把时，两条路进的是同一个 Cline 账号；换本机 `accounts` 里的 `sk_`，只影响反代，不影响别人直接拿官方地址。
+
+2026-09-28 18:11 UTC 换上 `sk_4ca0…` 之后，官方和反代都返回 401，Cline 要求重新登录。下面的值是当时写入的，失效后换新的再改这一节。
+
 ### 官方直连
 
 用 Cline 账户自己的 Pass Key。这个账号的响应里 `affinity.outcome=confirmed`，`pinnedProvider=deepseek`，是账号侧记住的渠道，不是请求体里的 `only`。
