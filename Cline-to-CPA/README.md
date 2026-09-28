@@ -101,3 +101,55 @@ curl -sS -m 10 -H "Authorization: Bearer <cps-密钥>" \
 ```
 
 实现在 [idlm/cline-pass-switcher](https://github.com/idlm/cline-pass-switcher) 的 `OBSERVE.md`。
+
+## 现在这两套都能用
+
+密钥会换。换完改本机 `~/.cline-pass-switcher/config.json` 的 `proxyKey`，并改下面这一节。
+
+### 官方直连
+
+用 Cline 账户自己的 Pass Key。这个账号的响应里 `affinity.outcome=confirmed`，`pinnedProvider=deepseek`，是账号侧记住的渠道，不是请求体里的 `only`。
+
+```
+Base URL   https://api.cline.bot/api/v1
+API Key    sk_4ca0003f431af043113838b11b542fbdf4040b9eff51295becc11ac69e35d27b
+Model      cline-pass/deepseek-v4.1-flash
+```
+
+```yaml
+openai-compatibility:
+  - name: "cline-pass-official"
+    base-url: "https://api.cline.bot/api/v1"
+    api-key-entries:
+      - api-key: "sk_4ca0003f431af043113838b11b542fbdf4040b9eff51295becc11ac69e35d27b"
+    models:
+      - name: "cline-pass/deepseek-v4.1-flash"
+        alias: "ds-flash"
+```
+
+`/v1/models` 返回的是官方目录，大约 400 多个，不只有 `cline-pass/`。
+
+### 本机反代
+
+只用来进本机观测代理。代理再用本机已登录的 Cline 账号去打官方，所以这把 `cps-` 不能拿去调 `api.cline.bot`。本机这条的 `affinity` 是 `no_pin`，渠道仍由网关当次决定，控制台只负责记录。
+
+```
+Base URL   http://69.33.213.80:3123/v1
+API Key    cps-5fef8be5cea11b671289fa3be8d24cf8b9ee4cdc43ae9a71
+Model      cline-pass/deepseek-v4.1-flash
+```
+
+```yaml
+openai-compatibility:
+  - name: "cline-pass"
+    base-url: "http://69.33.213.80:3123/v1"
+    api-key-entries:
+      - api-key: "cps-5fef8be5cea11b671289fa3be8d24cf8b9ee4cdc43ae9a71"
+    models:
+      - name: "cline-pass/deepseek-v4.1-flash"
+        alias: "ds-flash"
+```
+
+`/v1/models` 只返回本机列出的 6 个 `cline-pass/*`。不带 `cps-` 密钥访问公网是 401。本机 Cline CLI 继续用 `http://127.0.0.1:3123/v1`，不需要这把密钥。
+
+两套不要混：`sk_` 只给官方地址，`cps-` 只给 `69.33.213.80:3123`。
