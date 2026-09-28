@@ -276,6 +276,7 @@ openai-compatibility:
 - [其它办法（一眼看完）](#其它办法一眼看完)
 - [只改配置文件：谁行、谁不行、不行怎么办](#只改配置文件谁行谁不行不行怎么办)
 - [实测：能不能钉住](#实测能不能钉住)
+- [2026-09-20 起：规划器不再读 providerOptions](#2026-09-20-起规划器不再读-provideroptions)
 - [这解决什么问题](#这解决什么问题)
 - [最简方案：Codex / Claude Code](#最简方案codex--claude-code)
 - [客户端怎么指](#客户端怎么指)
@@ -297,7 +298,9 @@ openai-compatibility:
 
 ## 实测：能不能钉住
 
-**能。** 2026-09-19 用测试 `sk_` 直连 `https://api.cline.bot/api/v1/chat/completions`，模型 `cline-pass/deepseek-v4.1-flash`，看响应里的
+2026-09-19 当天 **能钉**。**2026-09-20 起，规划器管道不再读取 `providerOptions`，注入等于没写。** 详见下一节。下面这张表只代表 09-19。
+
+2026-09-19 用测试 `sk_` 直连 `https://api.cline.bot/api/v1/chat/completions`，模型 `cline-pass/deepseek-v4.1-flash`，看响应里的
 
 `data.choices[0].message.provider_metadata.gateway.routing.finalProvider`
 
@@ -324,6 +327,83 @@ relace  runware  togetherai  wafer
 
 ---
 
+## 2026-09-20 起：规划器不再读 providerOptions
+
+网关已不再读取请求体里的 `providerOptions`。任何 `providerOptions.gateway.*` 都被静默丢掉：请求照常成功，也不再触发路由层报错。于是本工具所有靠注入的功能一起空转。
+
+| 功能 | 依赖 | 现状 |
+|:--|:--|:--|
+| 严格钉住 / 优先再回退 | `providerOptions.gateway.only` / `order` | 被丢掉，按网关自己的执行链走 |
+| 上游排除（换算成 only 白名单） | `providerOptions.gateway.only` | 被丢掉 |
+| 排序（最低成本 / 最快首字 / 最高吞吐） | `providerOptions.gateway.sort` | 被丢掉 |
+| 上游枚举 `harvestAvailableProviders()` | 假上游名触发的报错清单 | 不再报错，拿不到清单 |
+| 「校验」 | 逐个 `only` 钉住再看报错分类 | 每个渠道都成功，于是全部标成可用 |
+
+### 一行判定
+
+用格式合法、但并不存在的上游名探测。报错，说明参数还被读；返回 200，说明参数已被丢掉。
+
+```bash
+curl -s https://api.cline.bot/api/v1/chat/completions \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{"model":"cline-pass/deepseek-v4.1-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":16,
+       "providerOptions":{"gateway":{"only":["zzz-not-a-provider"]}}}'
+```
+
+现在是 200，正文正常，`provider_metadata.gateway.routing.finalProvider` 是 `deepseek`。
+
+2026-09-17 同一把 key、同一次调用会被路由层拒绝（Vercel 侧 400）。错误正文里带候选清单，形如 `Available providers are: alibaba, baseten, boundless, deepinfra, deepseek, fireworks, gmicloud, modal, morph, novita, parasail, particle, relace, runware, togetherai, wafer`，一共 16 家。
+
+`providerOptions.gateway.sort` 也一起失效。带 `sort:"cost"` 或 `sort:"tps"` 时，`planningReasoning` 里那 16 家执行链逐字不变。丢掉的是整个 `gateway` 对象，不是某几个子字段。换字段名、换探针名都恢复不了。
+
+### 不是请求头，而且只发生在规划器管道
+
+请求头试过 Node 默认 `User-Agent`、自定义 `User-Agent`，以及 `X-Client-Type: cline-cli`。`finalProvider` 和候选数完全一样。本工具发往上游的请求本身也只带 `Content-Type` 和 `Authorization`（`server.js:123`），所以不是少带了一个头。
+
+同一把 key、同一时刻，直连管道仍然认顶层 `provider.only`：
+
+- `:free` 目录模型（例如 `inclusionai/ling-3.0-flash-vl:free`）基线是 200，`provider=Novita`
+- 钉它自己 `only:["novita"]` 仍是 200，`provider=Novita`
+- 钉一个不存在的名字，则明确报 `500 ... No allowed providers are available`
+
+失效只发生在 `cline-pass` 的规划器管道，也就是 Vercel AI Gateway 那条。OpenRouter 那条没事。
+
+### 两个看起来像成功、其实不是的现象
+
+渠道列表里不再有 `deepseek`。`fallbacksAvailable` 是执行链去掉链首。网关现在把 `deepseek` 放在链首（`planningReasoning` 里 `System credentials planned for:` 的第一位，也正是这次的 `finalProvider`），所以它不再出现在备选清单里。`harvest` 又已经失效，列表只剩 15 家，不含 `deepseek`。
+
+对照 2026-09-17：链首是 `baseten`（试了 503），然后命中 `fireworks`。那时 `fallbacksAvailable` 里 `deepseek` 排在第 12 位。
+
+「之前固定过的还能用」是假象。注入被丢掉以后，请求照发照回。用户选中 `deepseek` 之所以看着生效，是因为网关自己的链首恰好就是 `deepseek`。判据：把固定改成 `togetherai`，或者一个不存在的名字，同样 200，而且 `finalProvider` 仍是 `deepseek`。如果固定还生效，后者应该像直连管道那样报错。
+
+「校验」现在会把所有渠道标成可用。钉不住时，每个渠道的请求都成功，返回 `empty response content`。`classifyUpstreamError()` 把这句判成 ok（`server.js:306`），包括实测 429 / 503 的 `baseten`、`wafer`、`relace`。
+
+### 可以怎么改
+
+先加一个「参数是否还被读取」的探测，用它当总开关。`only:["zzz-not-a-provider"]` 如果返回 200，而且错误正文里没有 `Available providers are:`，就把该模型标成 `pinnable:false`。界面写明：网关已忽略上游偏好，这个模型的钉住、排除、排序、校验都不可用，并停掉这三类注入。
+
+现在 `probeModel()` 只看 `r.pipeline` 就置 `pinnable: true`（`server.js:288`）。失效时会留下「以为钉着、其实没钉」的状态。
+
+列表改用 `planningReasoning`，不要只用 `fallbacksAvailable`。正文 `System credentials planned for:` 给出的是完整候选池，今天是 16 家，含链首。`fallbacksAvailable` 今天是 15 家，不含链首。探针失效以后，这是唯一还可靠的枚举来源。如果只想做最小改动，把 `finalProvider` 并进列表也能让 `deepseek` 回来，但必须同时标注钉不住，否则错觉更强。
+
+`pinnable:false` 时把「校验」置灰，避免输出全绿。
+
+### 当时的环境
+
+| 项 | 值 |
+|:--|:--|
+| 上游 | `https://api.cline.bot/api/v1`，Cline Pass key，在账号面板 `/dashboard/account?tab=api-keys` 创建 |
+| 模型 | `cline-pass/deepseek-v4.1-flash` |
+| 旁证 | `cline-pass/glm-5.3-flash` 连 `provider_metadata` 都不回；`cline-pass/deepseek-v4-flash` 的执行链只有 `openai-compatible-private` 一家，没有可钉候选 |
+| 复现 | 2026-09-20 11:5x–13:0x UTC。09-17 同一次调用是报错的 |
+| 本工具 | v1.2.0，HEAD `02538a3`，2026-09-11 |
+
+本机在自建代理里对同一上游做同样的注入，行为一致，可以排除只有这个工具有问题。
+
+`harvestAvailableProviders()` 用的探针名 `__probe__` 是下划线形状。网关对这类名字会静默丢掉。说明里「上游枚举的三种手段」第 2 条，其实从 09-17 起就取不到清单。这次换成 `zzz-not-a-provider` 这种合法 slug，也一样拿不到。根因仍是整个 `providerOptions` 被忽略。
+
+---
+
 ## 这解决什么问题
 
 ```
@@ -345,8 +425,9 @@ cline-pass/deepseek-v4.1-flash
 顶层 `provider.*` 会被 Cline 丢弃，这就是「换上游不生效」的原因。
 规划器管道必须写嵌套的 `providerOptions.gateway`。
 
-**更正（2026-09）：现在只能钉 Vercel 的 deepseek 官转，OpenRouter 不让钉了。**
-slug 仍是 `deepseek`。
+**更正（2026-09-19）：当时只能钉 Vercel 的 deepseek 官转，OpenRouter 不让钉了。** slug 仍是 `deepseek`。
+
+**再更正（2026-09-20）：规划器连 `providerOptions.gateway` 也不读了。** switcher 注入的钉住、排除、排序现在都是空操作。请求仍返回 200，`finalProvider` 只是网关自己的链首。判定和改法见 [上一节](#2026-09-20-起规划器不再读-provideroptions)。
 
 ---
 
